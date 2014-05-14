@@ -36,6 +36,69 @@
 #include "SkXfermode.h"
 
 
+#include <pthread.h>
+
+#define SIZE_OF_PAINT (80)
+
+SkLangEntry::SkLangEntry(){
+    new(&entry) SkLanguage();
+    next = NULL;
+}
+
+static class SkLangPool gLanguages;
+
+SkLangPool::SkLangPool(){
+    LangPool  = NULL;
+    mtx = PTHREAD_MUTEX_INITIALIZER;
+}
+
+SkLangEntry* SkLangPool::setLanguage( const SkLanguage& lang ){
+start:
+    if (!LangPool) {
+        pthread_mutex_lock(&mtx);
+        if (!LangPool){
+            LangPool = new SkLangEntry();
+            LangPool->entry = lang;
+            pthread_mutex_unlock(&mtx);
+            return LangPool;
+        } else {
+            pthread_mutex_unlock(&mtx);
+            goto start;
+        }
+    }
+    SkLangEntry* current = LangPool;
+    SkLangEntry* prev = LangPool;
+    while (current) {
+        if (current->entry == lang){
+            return current;
+        }
+        prev = current;
+        current = current->next;
+    }
+    pthread_mutex_lock(&mtx);
+    current = LangPool;
+    prev = LangPool;
+    while (current) {
+        if (current->entry == lang){
+            pthread_mutex_unlock(&mtx);
+            return current;
+        }
+        prev = current;
+        current = current->next;
+    }
+    current = new SkLangEntry();
+    prev->next = current;
+    current->entry = lang;
+    pthread_mutex_unlock(&mtx);
+
+    return current;
+}
+
+
+const SkLanguage& SkLangPool::getLanguage(SkLangEntry* t) const {
+    return t->entry;
+}
+
 // define this to get a printf for out-of-range parameter in setters
 // e.g. setTextSize(-1)
 //#define SK_REPORT_API_RANGE_CHECK
@@ -90,8 +153,30 @@ SkPaint::SkPaint() {
 #endif
 }
 
+extern "C" {
+    inline void memcpy_paint_opt(int* dst, int* src) {
+
+    __asm__ volatile
+	(
+        "cpy            r4, %[src]	\n\t"
+        "cpy            r5, %[dst]  \n\t"
+        "vld1.8         {q0, q1}, [r4]! \n\t"
+        "vst1.8         {q0, q1}, [r5]! \n\t"
+        "vld1.8         {q0, q1}, [r4]! \n\t"
+        "vst1.8         {q0, q1}, [r5]! \n\t"
+        "vld1.8         {q0},     [r4]! \n\t"
+        "vst1.8         {q0},     [r5]! \n\t"
+        :
+        : [src] "r" (src), [dst] "r" (dst)
+        : "r4", "r5", "q0", "q1"
+        );
+    }
+}
 SkPaint::SkPaint(const SkPaint& src) {
-    memcpy(this, &src, sizeof(src));
+    if (sizeof(src) == SIZE_OF_PAINT)
+	memcpy_paint_opt((int*)this, (int*)&src);
+    else
+        memcpy((int*)this, (int*)&src, sizeof(src));
 
     SkSafeRef(fTypeface);
     SkSafeRef(fPathEffect);

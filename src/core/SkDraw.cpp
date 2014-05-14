@@ -31,6 +31,25 @@
 #include "SkBitmapProcShader.h"
 #include "SkDrawProcs.h"
 #include "SkMatrixUtils.h"
+#include <cutils/log.h>
+
+#define SIZE_OF_DRAW (32)
+
+#if defined(FIMG2D_ENABLED)
+
+#if defined(FIMG2D_V4L2_ENABLED)
+#include "SkFimgV4L2.h"
+#else
+#include "SkFimgApi4x.h"
+#endif
+
+#define FORCE_CPU_WIDTH (100)
+#define FORCE_CPU_HEIGHT (100)
+
+#if defined(FIMG2D_BOOSTUP)
+Fimg prev_fimg;
+#endif
+#endif
 
 bool SkDraw::ShouldDrawTextAsPaths(const SkPaint& paint, const SkMatrix& ctm) {
     // we don't cache hairlines in the cache
@@ -131,8 +150,26 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
+extern "C" {
+    inline void memset_draw_opt(int* dst) {
+    __asm__ volatile
+        (
+         "cpy           r4, %[dst] \n\t"
+         "vmov.u64      q0, #0 \n\t"
+         "vmov.u64      q1, #0 \n\t"
+         "vst1.64       {q0, q1}, [r4] \n\t"
+         :
+         : [dst] "r" (dst)
+         : "r4", "q0", "q1"
+        );
+    }
+}
+
 SkDraw::SkDraw() {
-    sk_bzero(this, sizeof(*this));
+    if (sizeof(*this) == SIZE_OF_DRAW)
+        memset_draw_opt((int*)this);
+    else
+        sk_bzero(this, sizeof(*this));
 }
 
 SkDraw::SkDraw(const SkDraw& src) {
@@ -896,6 +933,116 @@ void SkDraw::drawRect(const SkRect& rect, const SkPaint& paint) const {
         const SkRasterClip& clip = looper.getRC();
         SkBlitter*          blitter = blitterStorage.get();
 
+#if defined(FIMG2D_ENABLED)
+        if (ir.width() > FORCE_CPU_WIDTH && ir.height() > FORCE_CPU_HEIGHT) {
+            SkShader*           tempShader = NULL;
+            SkBitmap            srcBitmap;
+            SkShader::TileMode          tempTileMode[2];
+            SkShader::BitmapType        srcBitmapType;
+            tempShader = paint.getShader();
+            if (tempShader) {
+                SkShader::BitmapType srcBitmapType = tempShader->asABitmap(&srcBitmap, NULL, tempTileMode);
+
+                if ((srcBitmapType == SkShader::kDefault_BitmapType) && (srcBitmap.isNull() == false) &&
+                   (tempTileMode[0] == SkShader::kClamp_TileMode) && (tempTileMode[1] == SkShader::kClamp_TileMode)) {
+                    SkRect r;
+                    SkIRect fimg_ir;
+                    Fimg fimg;
+                    const SkIRect& clipBounds = clip.getBounds();
+
+                    r.set(0, 0, SkIntToScalar(srcBitmap.width()),
+                            SkIntToScalar(srcBitmap.height()));
+
+                    r.round(&fimg_ir);
+
+                    fimg.srcX           = fimg_ir.fLeft;
+                    fimg.srcY           = fimg_ir.fTop;
+                    fimg.srcW           = fimg_ir.width();
+                    fimg.srcH           = fimg_ir.height();
+
+                    fimg.srcFWStride    = srcBitmap.rowBytes();
+                    fimg.srcFH          = srcBitmap.height();
+                    fimg.srcBPP         = srcBitmap.bytesPerPixel();
+                    fimg.srcColorFormat = srcBitmap.getConfig();
+                    srcBitmap.lockPixels();
+                    fimg.srcAddr = (unsigned char *)srcBitmap.getAddr(0, 0);
+
+                    if ((r.fLeft < 0) || (r.fTop < 0))
+                        fimg.srcAddr = NULL;
+
+                    devRect.round(&fimg_ir);
+
+                    fimg.dstX           = fimg_ir.fLeft;
+                    fimg.dstY           = fimg_ir.fTop;
+                    fimg.dstW           = fimg_ir.width();
+                    fimg.dstH           = fimg_ir.height();
+
+                    fimg.dstFWStride    = fBitmap->rowBytes();
+                    fimg.dstFH          = fBitmap->height();
+                    fimg.dstBPP         = fBitmap->bytesPerPixel();
+                    fimg.dstColorFormat = fBitmap->config();
+                    fBitmap->lockPixels();
+                    fimg.dstAddr = (unsigned char *)fBitmap->getAddr(0, 0);
+
+                    fimg.mskAddr        = NULL;
+                    fimg.rotate         = 0;
+                    fimg.alpha          = paint.getAlpha();
+
+                    if (srcBitmap.isOpaque() && (255 == fimg.alpha))
+                        fimg.alpha = 255;
+                    if (clip.isRect()) {
+                        fimg.clipT = clipBounds.fTop;
+                        fimg.clipB = clipBounds.fBottom;
+                        fimg.clipL = clipBounds.fLeft;
+                        fimg.clipR = clipBounds.fRight;
+                    } else {
+                        fimg.srcAddr = NULL;
+                        fimg.clipT = 0;
+                        fimg.clipB = 0;
+                        fimg.clipL = 0;
+                        fimg.clipR = 0;
+                    }
+
+                    SkXfermode::Mode  mode;
+                    SkXfermode::IsMode(paint.getXfermode(), &mode);
+                    fimg.xfermode = mode;
+                    fimg.isDither = paint.isDither();
+                    fimg.isFilter = paint.isFilterBitmap();
+                    fimg.colorFilter = (int)paint.getColorFilter();
+
+                    fimg.matrixType = (int)matrix.getType();
+                    fimg.matrixSx = matrix.getScaleX();
+                    fimg.matrixSy = matrix.getScaleY();
+
+                    if ((fimg.dstW <= 0)||(fimg.dstH <= 0))
+                        fimg.srcAddr = NULL;
+
+                    if (fimg.srcAddr != NULL && fimg.dstAddr != NULL) {
+                        int retFimg;
+#ifdef FIMG2D_BOOSTUP
+                        if (FimgApiCheckBoostup(&fimg, &prev_fimg)) {
+                            retFimg = FIMGAPI_FINISHED;
+                        } else {
+                            memcpy(&prev_fimg, &fimg, sizeof(fimg));
+                            retFimg = FimgApiStretch(&fimg, __func__);
+                        }
+#else
+                        retFimg = FimgApiStretch(&fimg, __func__);
+#endif
+                        if (retFimg) {
+                            fimg.srcAddr = NULL;
+                            return;
+                        }
+                    }
+
+                    fimg.srcAddr = NULL;
+#ifdef FIMG2D_BOOSTUP
+                    prev_fimg.srcAddr = NULL;
+#endif
+                }
+            }
+        }
+#endif
         // we want to "fill" if we are kFill or kStrokeAndFill, since in the latter
         // case we are also hairline (if we've gotten to here), which devolves to
         // effectively just kFill
@@ -1349,6 +1496,9 @@ void SkDraw::drawBitmap(const SkBitmap& bitmap, const SkMatrix& prematrix,
         int ix = SkScalarRound(matrix.getTranslateX());
         int iy = SkScalarRound(matrix.getTranslateY());
         if (clipHandlesSprite(*fRC, ix, iy, bitmap)) {
+#if defined(FIMG2D_ENABLED)
+            Fimg fimg;
+#endif
             uint32_t    storage[kBlitterStorageLongCount];
             SkBlitter*  blitter = SkBlitter::ChooseSprite(*fBitmap, paint, bitmap,
                                                 ix, iy, storage, sizeof(storage));
@@ -1358,7 +1508,85 @@ void SkDraw::drawBitmap(const SkBitmap& bitmap, const SkMatrix& prematrix,
                 SkIRect    ir;
                 ir.set(ix, iy, ix + bitmap.width(), iy + bitmap.height());
 
+#if defined(FIMG2D_ENABLED)
+                SkAAClipBlitterWrapper wrapper(*fRC, blitter);
+                const SkRegion&       clip = wrapper.getRgn();
+                SkRegion::Cliperator    cliper(clip, ir);
+                const SkIRect&          cr = cliper.rect();
+                memset(&fimg, 0, sizeof(fimg));
+                for (; !cliper.done(); cliper.next()) {
+
+                    fimg.matrixType = (int)matrix.getType();
+                    fimg.matrixSx = matrix.getScaleX();
+                    fimg.matrixSy = matrix.getScaleY();
+
+                    fimg.srcX           = cr.fLeft - ix;
+                    fimg.srcY           = cr.fTop - iy;
+                    fimg.srcW           = cr.width();
+                    fimg.srcH           = cr.height();
+                    fimg.srcFWStride    = bitmap.rowBytes();
+                    fimg.srcFH          = bitmap.height();
+                    fimg.srcBPP         = bitmap.bytesPerPixel();
+                    fimg.srcColorFormat = bitmap.getConfig();
+                    fimg.srcAddr        = (unsigned char *)bitmap.getAddr(0, 0);
+
+                    fimg.dstX           = cr.fLeft;
+                    fimg.dstY           = cr.fTop;
+                    fimg.dstW           = cr.width();
+                    fimg.dstH           = cr.height();
+                    fimg.dstFWStride    = fBitmap->rowBytes();
+                    fimg.dstFH          = fBitmap->height();
+                    fimg.dstBPP         = fBitmap->bytesPerPixel();
+                    fimg.dstColorFormat = fBitmap->config();
+                    fimg.dstAddr        = (unsigned char *)fBitmap->getAddr(0,0);
+
+                    if (((cr.fLeft - ix) < 0) || ((cr.fTop - iy) < 0))
+                        fimg.srcAddr = NULL;
+
+                    fimg.clipT          = cr.fTop;
+                    fimg.clipB          = cr.fBottom;
+                    fimg.clipL          = cr.fLeft;
+                    fimg.clipR          = cr.fRight;
+
+                    fimg.mskAddr        = NULL;
+                    fimg.rotate         = 0;
+
+                    SkXfermode::Mode mode;
+                    SkXfermode::IsMode(paint.getXfermode(), &mode);
+                    fimg.xfermode = mode;
+
+                    fimg.isDither = paint.isDither();
+                    fimg.colorFilter = (int)paint.getColorFilter();
+
+                    fimg.alpha = paint.getAlpha();
+                    if (bitmap.isOpaque() && (255 == fimg.alpha))
+                        fimg.alpha = 255;
+
+                    if (fimg.srcAddr != NULL) {
+                        int retFimg = FimgApiStretch(&fimg, __func__);
+
+                        if (retFimg == FIMGAPI_FINISHED) {
+                            fimg.srcAddr = NULL;
+                        } else {
+                            fimg.srcAddr = NULL;
+#ifdef FIMG2D_BOOSTUP
+                            prev_fimg.srcAddr = NULL;
+#endif
+                            SkScan::FillIRect(ir, *fRC, blitter);
+                            return;
+                        }
+                    } else {
+                        fimg.srcAddr = NULL;
+#ifdef FIMG2D_BOOSTUP
+                        prev_fimg.srcAddr = NULL;
+#endif
+                        SkScan::FillIRect(ir, *fRC, blitter);
+                        return;
+                    }
+                }
+#else
                 SkScan::FillIRect(ir, *fRC, blitter);
+#endif
                 return;
             }
         }
