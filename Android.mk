@@ -310,6 +310,38 @@ ifeq ($(NO_FALLBACK_FONT),true)
 	LOCAL_CFLAGS += -DNO_FALLBACK_FONT
 endif
 
+###################### G2D ################
+ifeq ($(BOARD_USES_FIMGAPI),true)
+ifeq ($(filter-out exynos4,$(TARGET_BOARD_PLATFORM)),)
+LOCAL_CFLAGS += -DFIMG2D_ENABLED
+ifeq ($(TARGET_SOC), exynos4210)
+LOCAL_CFLAGS += -DSAMSUNG_EXYNOS4210
+LOCAL_C_INCLUDES += device/samsung/$(TARGET_BOARD_PLATFORM)/libfimg3x
+LOCAL_SRC_FILES += \
+	src/core/SkFimgApi3x.cpp
+LOCAL_CFLAGS += -DFIMG2D3X
+endif
+ifeq ($(TARGET_SOC), exynos4x12)
+LOCAL_CFLAGS += -DSAMSUNG_EXYNOS4x12
+LOCAL_C_INCLUDES += device/samsung/$(TARGET_BOARD_PLATFORM)/libfimg4x
+LOCAL_SRC_FILES += \
+	src/core/SkFimgApi4x.cpp
+LOCAL_CFLAGS += -DFIMG2D4X
+endif
+LOCAL_SHARED_LIBRARIES += libfimg
+endif
+ifeq ($(filter-out exynos5,$(TARGET_BOARD_PLATFORM)),)
+LOCAL_CFLAGS += -DFIMG2D_ENABLED
+ifeq ($(TARGET_SOC), exynos5250)
+LOCAL_CFLAGS += -DSAMSUNG_EXYNOS5250
+LOCAL_C_INCLUDES += device/samsung/$(TARGET_BOARD_PLATFORM)/libfimg4x
+LOCAL_SRC_FILES += \
+	src/core/SkFimgApi4x.cpp
+LOCAL_CFLAGS += -DFIMG2D4X
+endif
+LOCAL_SHARED_LIBRARIES += libfimg
+endif
+endif
 LOCAL_LDLIBS += -lpthread
 
 LOCAL_MODULE:= libskia

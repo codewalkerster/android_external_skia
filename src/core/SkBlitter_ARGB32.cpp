@@ -11,8 +11,88 @@
 #include "SkUtils.h"
 #include "SkXfermode.h"
 #include "SkBlitMask.h"
+#define LOG_TAG "SKIA"
+#include <utils/Log.h>
+#if defined(FIMG2D_ENABLED)
+#include "SkBitmap.h"
+#include "SkBitmapProcShader.h"
+#if defined(FIMG2D4X)
+#include "SkFimgApi4x.h"
+extern Fimg fimg;
+extern SkMutex gG2DMutex;
+#endif
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
+static inline int upscale31To32(int value) {
+    SkASSERT((unsigned)value <= 31);
+    return value + (value >> 4);
+}
+
+static inline int blend32(int src, int dst, int scale) {
+    SkASSERT((unsigned)src <= 0xFF);
+    SkASSERT((unsigned)dst <= 0xFF);
+    SkASSERT((unsigned)scale <= 32);
+    return dst + ((src - dst) * scale >> 5);
+}
+
+static void blit_lcd16_opaque(SkPMColor dst[], const uint16_t src[],
+                              SkPMColor color, int width) {
+    int srcR = SkGetPackedR32(color);
+    int srcG = SkGetPackedG32(color);
+    int srcB = SkGetPackedB32(color);
+
+    for (int i = 0; i < width; i++) {
+        uint16_t mask = src[i];
+        if (0 == mask) {
+            continue;
+        }
+
+        SkPMColor d = dst[i];
+        
+        /*  We want all of these in 5bits, hence the shifts in case one of them
+         *  (green) is 6bits.
+         */
+        int maskR = SkGetPackedR16(mask) >> (SK_R16_BITS - 5);
+        int maskG = SkGetPackedG16(mask) >> (SK_G16_BITS - 5);
+        int maskB = SkGetPackedB16(mask) >> (SK_B16_BITS - 5);
+
+        // Now upscale them to 0..256, so we can use SkAlphaBlend
+        maskR = upscale31To32(maskR);
+        maskG = upscale31To32(maskG);
+        maskB = upscale31To32(maskB);
+
+        int maskA = SkMax32(SkMax32(maskR, maskG), maskB);
+
+        int dstA = SkGetPackedA32(d);
+        int dstR = SkGetPackedR32(d);
+        int dstG = SkGetPackedG32(d);
+        int dstB = SkGetPackedB32(d);
+
+        dst[i] = SkPackARGB32(blend32(0xFF, dstA, maskA),
+                              blend32(srcR, dstR, maskR),
+                              blend32(srcG, dstG, maskG),
+                              blend32(srcB, dstB, maskB));
+    }
+}
+
+static void blitmask_lcd16(const SkBitmap& device, const SkMask& mask,
+                           const SkIRect& clip, SkPMColor srcColor) {
+    int x = clip.fLeft;
+    int y = clip.fTop;
+    int width = clip.width();
+    int height = clip.height();
+
+    SkPMColor*		dstRow = device.getAddr32(x, y);
+    const uint16_t* srcRow = mask.getAddrLCD16(x, y);
+
+    do {
+        blit_lcd16_opaque(dstRow, srcRow, srcColor, width);
+        dstRow = (SkPMColor*)((char*)dstRow + device.rowBytes());
+        srcRow = (const uint16_t*)((const char*)srcRow + mask.fRowBytes);
+    } while (--height != 0);
+}
+
 
 static void SkARGB32_Blit32(const SkBitmap& device, const SkMask& mask,
 							const SkIRect& clip, SkPMColor srcColor) {
@@ -53,6 +133,7 @@ SkARGB32_Blitter::SkARGB32_Blitter(const SkBitmap& device, const SkPaint& paint)
 
     fPMColor = SkPackARGB32(fSrcA, fSrcR, fSrcG, fSrcB);
     fColor32Proc = SkBlitRow::ColorProcFactory();
+    fBlitMaskProc = SkBlitMask::ColorFactory(SkBitmap::kARGB_8888_Config, SkMask::kARGB32_Format, color);
 }
 
 const SkBitmap* SkARGB32_Blitter::justAnOpaqueColor(uint32_t* value) {
@@ -159,9 +240,28 @@ void SkARGB32_Blitter::blitMask(const SkMask& mask, const SkIRect& clip) {
     }
 
     if (mask.fFormat == SkMask::kBW_Format) {
+#if defined(FIMG2D4X)
+#if (FIMGAPI_G2D_BLOKING == TRUE)
+        gG2DMutex.acquire();
+#else
+        if (gG2DMutex.tryacquire() != 0) {
+            SkARGB32_BlendBW(fDevice, mask, clip, fPMColor, SkAlpha255To256(255 - fSrcA));
+            return;
+        }
+#endif
+        int retFimg = FimgARGB32_BW(fimg, fDevice, mask, clip, fPMColor, SkAlpha255To256(255 - fSrcA));
+        if (retFimg != FIMGAPI_FINISHED)
+            SkARGB32_BlendBW(fDevice, mask, clip, fPMColor, SkAlpha255To256(255 - fSrcA));
+
+        gG2DMutex.release();
+#else
         SkARGB32_BlendBW(fDevice, mask, clip, fPMColor, SkAlpha255To256(255 - fSrcA));
+#endif
     } else if (SkMask::kARGB32_Format == mask.fFormat) {
 		SkARGB32_Blit32(fDevice, mask, clip, fPMColor);
+    } else if (SkMask::kLCD16_Format == mask.fFormat) {
+        blitmask_lcd16(fDevice, mask, clip, fPMColor);
+        return;
     }
 }
 
@@ -174,10 +274,103 @@ void SkARGB32_Opaque_Blitter::blitMask(const SkMask& mask,
     }
     
     if (mask.fFormat == SkMask::kBW_Format) {
+#if defined(FIMG2D4X)
+#if (FIMGAPI_G2D_BLOKING == TRUE)
+        gG2DMutex.acquire();
+#else
+        if (gG2DMutex.tryacquire() != 0) {
+            SkARGB32_BlitBW(fDevice, mask, clip, fPMColor);
+            return;
+        }
+#endif
+        int retFimg = FimgARGB32_BW(fimg, fDevice, mask, clip, fPMColor, SkAlpha255To256(255));
+        if (retFimg != FIMGAPI_FINISHED)
+            SkARGB32_BlitBW(fDevice, mask, clip, fPMColor);
+
+        gG2DMutex.release();
+#else
         SkARGB32_BlitBW(fDevice, mask, clip, fPMColor);
+#endif
     } else if (SkMask::kARGB32_Format == mask.fFormat) {
 		SkARGB32_Blit32(fDevice, mask, clip, fPMColor);
 	}
+
+    int x = clip.fLeft;
+    int y = clip.fTop;
+    int width = clip.width();
+    int height = clip.height();
+
+
+#if defined(FIMG2D4X)
+
+#if (FIMGAPI_G2D_BLOKING == TRUE)
+    gG2DMutex.acquire();
+#else
+    if (gG2DMutex.tryacquire() != 0) {
+        fBlitMaskProc(fDevice.getAddr32(x, y), fDevice.rowBytes(),
+                      SkBitmap::kARGB_8888_Config,
+                      mask.getAddr(x, y), mask.fRowBytes, fColor, width, height);
+        return;
+    }
+#endif
+
+    fimg.srcAddr        = (unsigned char *)NULL;
+
+    fimg.isSolidFill    = false;
+    fimg.fillcolor      = toARGB32(SkPreMultiplyColor(fColor));
+
+    fimg.srcColorFormat = fDevice.config();
+
+    fimg.dstX           = x;
+    fimg.dstY           = y;
+    fimg.dstW           = width;
+    fimg.dstH           = height;
+    fimg.dstFWStride    = fDevice.rowBytes();
+    fimg.dstFH          = fDevice.height();
+    fimg.dstBPP         = fDevice.bytesPerPixel();
+    fimg.dstColorFormat = fDevice.config();
+    fimg.dstAddr        = (unsigned char *)fDevice.getAddr(0,0);
+
+    fimg.clipT = y;
+    fimg.clipB = y + height;
+    fimg.clipL = x;
+    fimg.clipR = x + width;
+
+    fimg.mskX           = 0;
+    fimg.mskY           = 0;
+    fimg.mskW           = width;
+    fimg.mskH           = height;
+    fimg.mskFWStride    = mask.fRowBytes;
+    fimg.mskFH          = height;
+    fimg.mskBPP         = 1;
+    fimg.mskColorFormat = SkBitmap::kA8_Config;
+    fimg.mskAddr        = (unsigned char *)mask.getAddr(x, y);
+
+    fimg.rotate         = 0;
+
+    fimg.xfermode = SkXfermode::kSrcOver_Mode;
+    fimg.isDither = false;
+    fimg.colorFilter = NULL;
+    fimg.matrixType = 0;
+    fimg.matrixSx = 0;
+    fimg.matrixSy = 0;
+
+    fimg.alpha = 0xFF;
+
+    fimg.canusehybrid = 0;
+    int retFimg = FimgApiStretch(&fimg, __func__);
+    if (retFimg != FIMGAPI_FINISHED)
+        fBlitMaskProc(fDevice.getAddr32(x, y), fDevice.rowBytes(),
+//                      SkBitmap::kARGB_8888_Config,
+                      mask.getAddr(x, y), mask.fRowBytes, fColor, width, height);
+
+    gG2DMutex.release();
+
+#else
+    fBlitMaskProc(fDevice.getAddr32(x, y), fDevice.rowBytes(),
+//                  SkBitmap::kARGB_8888_Config,
+                  mask.getAddr(x, y), mask.fRowBytes, fColor, width, height);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -224,6 +417,89 @@ void SkARGB32_Blitter::blitRect(int x, int y, int width, int height) {
 #endif
 
 ///////////////////////////////////////////////////////////////////////
+void SkARGB32_Black_Blitter::blitMask(const SkMask& mask, const SkIRect& clip) {
+    SkASSERT(mask.fBounds.contains(clip));
+
+    if (mask.fFormat == SkMask::kBW_Format) {
+        SkPMColor black = (SkPMColor)(SK_A32_MASK << SK_A32_SHIFT);
+
+#if defined(FIMG2D4X)
+#if (FIMGAPI_G2D_BLOKING == TRUE)
+        gG2DMutex.acquire();
+#else
+        if (gG2DMutex.tryacquire() != 0) {
+            SkARGB32_BlitBW(fDevice, mask, clip, black);
+            return;
+        }
+#endif
+        int retFimg = FimgARGB32_BW(fimg, fDevice, mask, clip, fPMColor, SkAlpha255To256(255));
+        if (retFimg != FIMGAPI_FINISHED)
+            SkARGB32_BlitBW(fDevice, mask, clip, black);
+
+        gG2DMutex.release();
+#else
+        SkARGB32_BlitBW(fDevice, mask, clip, black);
+#endif
+    } else if (SkMask::kARGB32_Format == mask.fFormat) {
+		SkARGB32_Blit32(fDevice, mask, clip, fPMColor);
+    } else if (SkMask::kLCD16_Format == mask.fFormat) {
+        blitmask_lcd16(fDevice, mask, clip, fPMColor);
+    } else {
+#if defined(SK_SUPPORT_LCDTEXT)
+        const bool      lcdMode = mask.fFormat == SkMask::kHorizontalLCD_Format;
+        const bool      verticalLCDMode = mask.fFormat == SkMask::kVerticalLCD_Format;
+#endif
+
+        // In LCD mode the masks have either an extra couple of rows or columns on the edges.
+        unsigned        width = clip.width();
+        unsigned        height = clip.height();
+
+        SkASSERT((int)height > 0);
+        SkASSERT((int)width > 0);
+
+#if defined(SK_SUPPORT_LCDTEXT)
+        if (lcdMode || verticalLCDMode) {
+            int widthAdjustment, heightAdjustment;
+            const uint32_t* alpha32;
+            uint32_t* device = adjustForSubpixelClip(mask, clip, fDevice, &widthAdjustment, &heightAdjustment, &alpha32);
+
+            width += widthAdjustment;
+            height += heightAdjustment;
+
+            unsigned deviceRB = fDevice.rowBytes() - (width << 2);
+            unsigned alphaExtraRowWords = mask.rowWordsLCD() - width;
+
+            do {
+                unsigned w = width;
+                do {
+                    const uint32_t alphaPixel = *alpha32++;
+                    const uint32_t originalPixel = *device;
+                    *device++ = BlendLCDPixelWithBlack(alphaPixel, originalPixel);
+                } while (--w != 0);
+                device = (uint32_t*)((char*)device + deviceRB);
+                alpha32 += alphaExtraRowWords;
+            } while (--height != 0);
+
+            return;
+        }
+#endif
+
+        uint32_t*      device = fDevice.getAddr32(clip.fLeft, clip.fTop);
+        unsigned       maskRB = mask.fRowBytes - width;
+        unsigned       deviceRB = fDevice.rowBytes() - (width << 2);
+        const uint8_t* alpha = (uint8_t*) mask.getAddr(clip.fLeft, clip.fTop);
+        do {
+            unsigned w = width;
+            do {
+                unsigned aa = *alpha++;
+                *device = (aa << SK_A32_SHIFT) + SkAlphaMulQ(*device, SkAlpha255To256(255 - aa));
+                device += 1;
+            } while (--w != 0);
+            device = (uint32_t*)((char*)device + deviceRB);
+            alpha += maskRB;
+        } while (--height != 0);
+    }
+}
 
 void SkARGB32_Black_Blitter::blitAntiH(int x, int y, const SkAlpha antialias[],
                                        const int16_t runs[]) {
