@@ -261,6 +261,12 @@ ifeq ($(ARCH_ARM_HAVE_NEON),true)
 LOCAL_SRC_FILES += \
 	src/opts/memset16_neon.S \
 	src/opts/memset32_neon.S
+
+ifeq ($(BOARD_USES_NEON_BLITANTIH),true)
+LOCAL_CFLAGS += -DNEON_BLIT
+LOCAL_SRC_FILES += \
+	src/core/asm/SkBlitter_RGB16_NEON.S
+endif
 endif
 
 LOCAL_SRC_FILES += \
@@ -317,6 +323,19 @@ ifeq ($(NO_FALLBACK_FONT),true)
 endif
 
 LOCAL_LDLIBS += -lpthread
+
+# for FIMG2D acceleration #
+ifeq ($(BOARD_USES_SKIA_FIMGAPI),true)
+LOCAL_CFLAGS += -DFIMG2D_ENABLED
+LOCAL_C_INCLUDES += $(TOP)/hardware/samsung_slsi/exynos/include
+LOCAL_SRC_FILES += src/core/SkFimgApi4x.cpp
+LOCAL_SHARED_LIBRARIES += libfimg
+ifeq ($(BOARD_USES_SKIA_FIMGAPI_BOOSTUP),true)
+LOCAL_CFLAGS += -DFIMG2D_BOOSTUP
+LOCAL_C_INCLUDES += $(TOP)/device/samsung/$(TARGET_BOOTLOADER_BOARD_NAME)/include
+LOCAL_SHARED_LIBRARIES += libfimg2d_board
+endif
+endif
 
 LOCAL_MODULE:= libskia
 
