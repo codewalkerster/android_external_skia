@@ -16,6 +16,7 @@
 #include "SkMatrix.h"
 #include "SkXfermode.h"
 #ifdef SK_BUILD_FOR_ANDROID
+#include <pthread.h>
 #include "SkPaintOptionsAndroid.h"
 #endif
 
@@ -42,6 +43,25 @@ typedef const SkGlyph& (*SkDrawCacheProc)(SkGlyphCache*, const char**,
                                            SkFixed x, SkFixed y);
 
 typedef const SkGlyph& (*SkMeasureCacheProc)(SkGlyphCache*, const char**);
+
+class SkLangEntry {
+public:
+    SkLangEntry();
+
+    SkLanguage entry;
+    SkLangEntry* next;
+};
+
+class SkLangPool {
+public:
+    SkLangPool();
+    SkLangEntry* setLanguage(const SkLanguage& lang);
+    const SkLanguage& getLanguage(SkLangEntry* t) const;
+
+private:
+    SkLangEntry* LangPool;
+    pthread_mutex_t mtx;
+};
 
 #define kBicubicFilterBitmap_Flag kHighQualityFilterBitmap_Flag
 
@@ -681,6 +701,38 @@ public:
     */
     void    setTextAlign(Align align);
 
+#ifdef SK_BUILD_FOR_ANDROID
+    /** Return the paint's language value used for drawing text.
+        @return the paint's language value used for drawing text.
+    */
+    const SkLanguage& getLanguage() const;
+
+
+    /** Set the paint's language value used for drawing text.
+        @param language set the paint's language value for drawing text.
+    */
+    void setLanguage(const SkLanguage& language);
+
+
+    enum FontVariant {
+       kDefault_Variant, // Currently setting yourself to Default gives you Compact Variant
+       kCompact_Variant,
+       kElegant_Variant,
+       kLast_Variant = kElegant_Variant,
+    };
+
+    /** Return the font variant
+        @return the font variant used by this paint object
+    */
+    FontVariant getFontVariant() const { return fFontVariant; }
+
+
+    /** Set the font variant
+      @param fontVariant set the paint's font variant for choosing fonts
+    */
+    void setFontVariant(FontVariant fontVariant);
+#endif
+
     /** Return the paint's text size.
         @return the paint's text size.
     */
@@ -1028,6 +1080,10 @@ private:
     enum PrivFlags {
         kNoDrawAnnotation_PrivFlag  = 1 << 0,
     };
+#ifdef SK_BUILD_FOR_ANDROID
+    SkLangEntry*    fpLanguage;
+    FontVariant     fFontVariant;
+#endif
 
     SkDrawCacheProc    getDrawCacheProc() const;
     SkMeasureCacheProc getMeasureCacheProc(TextBufferDirection dir,

@@ -523,6 +523,12 @@ LOCAL_SRC_FILES += \
 	src/opts/SkBlitRow_opts_arm_neon.cpp
 endif
 
+ifeq ($(BOARD_USES_NEON_BLITANTIH),true)
+LOCAL_CFLAGS += -DNEON_BLIT
+LOCAL_SRC_FILES += \
+	src/core/asm/SkBlitter_RGB16_NEON.S
+endif
+
 LOCAL_SRC_FILES += \
 	src/core/SkUtilsArm.cpp \
 	src/opts/opts_check_arm.cpp \
@@ -606,6 +612,26 @@ LOCAL_SHARED_LIBRARIES += libicuuc libicui18n
 LOCAL_CFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1
 
 LOCAL_LDLIBS += -lpthread
+
+# for FIMG2D acceleration #
+ifeq ($(BOARD_USES_SKIA_FIMGAPI),true)
+LOCAL_CFLAGS += -DFIMG2D_ENABLED
+LOCAL_SRC_FILES += src/core/SkThread_trylock.cpp
+LOCAL_C_INCLUDES += $(TOP)/hardware/samsung_slsi/exynos/include
+ifeq ($(BOARD_USES_FIMGAPI_V4L2),true)
+LOCAL_CFLAGS += -DFIMG2D_V4L2_ENABLED
+LOCAL_SRC_FILES += src/core/SkFimgV4L2.cpp
+LOCAL_SHARED_LIBRARIES += libexynosg2d
+else
+LOCAL_SRC_FILES += src/core/SkFimgApi4x.cpp
+LOCAL_SHARED_LIBRARIES += libfimg
+endif
+ifeq ($(BOARD_USES_SKIA_FIMGAPI_BOOSTUP),true)
+LOCAL_CFLAGS += -DFIMG2D_BOOSTUP
+LOCAL_C_INCLUDES += $(TOP)/vendor/samsung_slsi/exynos/include
+LOCAL_SHARED_LIBRARIES += libfimg2d_board
+endif
+endif
 
 LOCAL_MODULE:= libskia
 
