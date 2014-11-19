@@ -9,6 +9,7 @@
 #include "SkShader.h"
 #include "SkUtils.h"
 #include "SkUtilsArm.h"
+#include "SkColorPriv.h"
 
 // Helper to ensure that when we shift down, we do it w/o sign-extension
 // so the caller doesn't have to manually mask off the top 16 bits
@@ -78,21 +79,27 @@ extern const SkBitmapProcState::MatrixProc RepeatX_RepeatY_Procs_neon[];
 #endif // !SK_ARM_NEON_IS_NONE
 
 // Compile non-neon code path if needed
-#if !SK_ARM_NEON_IS_ALWAYS
 #define MAKENAME(suffix)        ClampX_ClampY ## suffix
 #define TILEX_PROCF(fx, max)    SkClampMax((fx) >> 16, max)
 #define TILEY_PROCF(fy, max)    SkClampMax((fy) >> 16, max)
 #define TILEX_LOW_BITS(fx, max) (((fx) >> 12) & 0xF)
 #define TILEY_LOW_BITS(fy, max) (((fy) >> 12) & 0xF)
 #define CHECK_FOR_DECAL
-#include "SkBitmapProcState_matrix.h"
+#if	defined(__ARM_HAVE_NEON)
+    #include "src/opts/SkBitmapProcState_matrix_clamp_neon_t.h"
+#else
+    #include "SkBitmapProcState_matrix.h"
+#endif
 
 #define MAKENAME(suffix)        RepeatX_RepeatY ## suffix
 #define TILEX_PROCF(fx, max)    SK_USHIFT16(((fx) & 0xFFFF) * ((max) + 1))
 #define TILEY_PROCF(fy, max)    SK_USHIFT16(((fy) & 0xFFFF) * ((max) + 1))
 #define TILEX_LOW_BITS(fx, max) ((((fx) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
 #define TILEY_LOW_BITS(fy, max) ((((fy) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
-#include "SkBitmapProcState_matrix.h"
+#if	defined(__ARM_HAVE_NEON)
+    #include "src/opts/SkBitmapProcState_matrix_repeat_neon_t.h"
+#else
+    #include "SkBitmapProcState_matrix.h"
 #endif
 
 #define MAKENAME(suffix)        GeneralXY ## suffix
@@ -300,7 +307,7 @@ static int nofilter_trans_preamble(const SkBitmapProcState& s, uint32_t** xy,
     return SkScalarToFixed(pt.fX) >> 16;
 }
 
-static void clampx_nofilter_trans(const SkBitmapProcState& s,
+void clampx_nofilter_trans(const SkBitmapProcState& s,
                                   uint32_t xy[], int count, int x, int y) {
     SkASSERT((s.fInvType & ~SkMatrix::kTranslate_Mask) == 0);
 
@@ -348,6 +355,140 @@ static void clampx_nofilter_trans(const SkBitmapProcState& s,
     sk_memset16(xptr, width - 1, count);
 }
 
+/*
+ * tao.zeng@amlogic.com, combine operation of clampx_nofilter_trans
+ * and S16_opaque_D32_nofilter_DX
+ */
+extern void S16_D32_decal_nofilter_scale_t(uint16_t *srcAddr, int fx, int dx, SkPMColor dstC[], int count);
+void ClampX_S16_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count)
+{
+    if (count == 0) {
+        return ;    
+    }
+    
+    uint16_t* SK_RESTRICT srcAddr = (uint16_t *)s.fBitmap->getPixels();
+    int xpos;
+
+    SkPoint pt;
+    s.fInvProc(s.fInvMatrix, SkIntToScalar(x) + SK_ScalarHalf,
+               SkIntToScalar(y) + SK_ScalarHalf, &pt);
+    int tmp =s.fIntTileProcY(SkScalarToFixed(pt.fY) >> 16,
+                             s.fBitmap->height());
+    srcAddr = (uint16_t *)((char*)srcAddr + tmp * s.fBitmap->rowBytes());
+
+    xpos = SkScalarToFixed(pt.fX) >> 16;
+
+    const int width = s.fBitmap->width();    
+    if (1 == width) {
+        // all of the following X values must be 0
+        sk_memset32(dstC, SkPixel16ToPixel32(srcAddr[0]), count);
+        return;
+    }
+    
+    int n;
+
+    // fill before 0 as needed
+    if (xpos < 0) {
+        n = -xpos;
+        if (n > count) {
+            n = count;
+        }
+        sk_memset32(dstC, SkPixel16ToPixel32(srcAddr[0]), n);
+        count -= n;
+        if (0 == count) {
+            return;
+        }
+        dstC += n;
+        xpos = 0;
+    }
+
+    // fill in 0..width-1 if needed
+    if (xpos < width) {
+        n = width - xpos;
+        if (n > count) {
+            n = count;
+        }
+        S16_D32_decal_nofilter_scale_t(srcAddr, xpos << 16, 0x10000, dstC, n);
+        count -= n;
+        if (0 == count) {
+            return;
+        }
+        dstC += n;
+    }
+
+    // fill the remaining with the max value
+    sk_memset32(dstC, SkPixel16ToPixel32(srcAddr[width - 1]), count);
+}
+
+// S32_opaque_D32_nofilter_DX + clampx_nofilter_trans
+void ClampX_S32_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count)
+{
+    if (count == 0) {
+        return ;    
+    }
+    
+    uint32_t* SK_RESTRICT srcAddr = (uint32_t *)s.fBitmap->getPixels();
+    int xpos;
+
+    SkPoint pt;
+    s.fInvProc(s.fInvMatrix, SkIntToScalar(x) + SK_ScalarHalf,
+               SkIntToScalar(y) + SK_ScalarHalf, &pt);
+    uint32_t tmp =s.fIntTileProcY(SkScalarToFixed(pt.fY) >> 16,
+                                  s.fBitmap->height());
+    srcAddr = (uint32_t *)((char*)srcAddr + tmp * s.fBitmap->rowBytes());
+
+    xpos = SkScalarToFixed(pt.fX) >> 16;
+
+    const int width = s.fBitmap->width();    
+    if (1 == width) {
+        // all of the following X values must be 0
+        sk_memset32(dstC, srcAddr[0], count);
+        return;
+    }
+    
+    int n;
+
+    // fill before 0 as needed
+    if (xpos < 0) {
+        n = -xpos;
+        if (n > count) {
+            n = count;
+        }
+        sk_memset32(dstC, srcAddr[0], n);
+        count -= n;
+        if (0 == count) {
+            return;
+        }
+        dstC += n;
+        xpos = 0;
+    }
+
+    // fill in 0..width-1 if needed
+    if (xpos < width) {
+        n = width - xpos;
+        if (n > count) {
+            n = count;
+        }
+        memcpy(dstC, srcAddr + xpos, n * sizeof(uint32_t));
+        count -= n;
+        if (0 == count) {
+            return;
+        }
+        dstC += n;
+    }
+
+    // fill the remaining with the max value
+    sk_memset32(dstC, srcAddr[width - 1], count);
+}
+
 static void repeatx_nofilter_trans(const SkBitmapProcState& s,
                                    uint32_t xy[], int count, int x, int y) {
     SkASSERT((s.fInvType & ~SkMatrix::kTranslate_Mask) == 0);
@@ -378,6 +519,54 @@ static void repeatx_nofilter_trans(const SkBitmapProcState& s,
 
     if (count > 0) {
         fill_sequential(xptr, 0, count);
+    }
+}
+
+// tao.zeng, add
+// S32_opaque_D32_nofilter_DX + repeatx_nofilter_trans
+void Repeatx_S32_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                      int       x,
+                                      int       y,
+                                      SkPMColor dstC[],
+                                      int       count)
+{
+    SkASSERT((s.fInvType & ~SkMatrix::kTranslate_Mask) == 0);
+
+    int xpos;  
+    
+    const uint32_t * SK_RESTRICT srcAddr = (const uint32_t*)s.fBitmap->getPixels();
+    SkPoint pt;
+    s.fInvProc(s.fInvMatrix, SkIntToScalar(x) + SK_ScalarHalf,
+               SkIntToScalar(y) + SK_ScalarHalf, &pt);
+    uint32_t tmp = s.fIntTileProcY(SkScalarToFixed(pt.fY) >> 16,
+                                   s.fBitmap->height());
+    xpos = SkScalarToFixed(pt.fX) >> 16;
+
+    srcAddr = (uint32_t *)((char*)srcAddr + tmp * s.fBitmap->rowBytes());
+    const int width = s.fBitmap->width();    
+    if (1 == width) {
+        // all of the following X values must be 0
+        sk_memset32(dstC, srcAddr[0], count);
+        return;
+    }
+
+    int start = sk_int_mod(xpos, width);
+    int n = width - start;
+    if (n > count) {
+        n = count;
+    }
+    memcpy(dstC, srcAddr + start, n * sizeof(uint32_t));
+    dstC += n;
+    count -= n;
+
+    while (count >= width) {
+        memcpy(dstC, srcAddr, width * sizeof(uint32_t));
+        dstC += width;
+        count -= width;
+    }
+
+    if (count > 0) {
+        memcpy(dstC, srcAddr, count * sizeof(uint32_t));
     }
 }
 
@@ -446,6 +635,181 @@ static void mirrorx_nofilter_trans(const SkBitmapProcState& s,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+#include <cutils/log.h>                                                 // tao.zeng, for debug
+
+#define OPEN_LOG                                1
+#define LOGD_IF     ALOGD_IF
+
+#define CLAMPX_NOFILTER_TRANS                   0
+#define REPEATX_NOFILTER_TRANS                  1
+#define MIRRORX_NOFILTER_TRANS                  2
+#define CLAMPX_CLAMPY_NOFILTER_SCALE_NEON       3
+#define CLAMPX_CLAMPY_FILTER_SCALE_NEON         4
+#define CLAMPX_CLAMPY_NOFILTER_AFFINE_NEON      5
+#define CLAMPX_CLAMPY_FILTER_AFFINE_NEON        6
+#define CLAMPX_CLAMPY_NOFILTER_PERSP_NEON       7
+#define CLAMPX_CLAMPY_FILTER_PERSP_NEON         8
+#define REPEATX_REPEATY_NOFILTER_SCALE_NEON     9 
+#define REPEATX_REPEATY_FILTER_SCALE_NEON       10
+#define REPEATX_REPEATY_NOFILTER_AFFINE_NEON    11
+#define REPEATX_REPEATY_FILTER_AFFINE_NEON      12
+#define REPEATX_REPEATY_NOFILTER_PERSP_NEON     13
+#define REPEATX_REPEATY_FILTER_PERSP_NEON       14
+#define GENERALXY_NOFILTER_SCALE_NEON           15 
+#define GENERALXY_FILTER_SCALE_NEON             16
+#define GENERALXY_NOFILTER_AFFINE_NEON          17
+#define GENERALXY_FILTER_AFFINE_NEON            18
+#define GENERALXY_NOFILTER_PERSP_NEON           19
+#define GENERALXY_FILTER_PERSP_NEON             20 
+
+int getMatrixProcName(void *pfunc)
+{
+    int i = -1;
+
+    if (pfunc == clampx_nofilter_trans) {
+        return CLAMPX_NOFILTER_TRANS;
+    }
+    if (pfunc == repeatx_nofilter_trans) {
+        return REPEATX_NOFILTER_TRANS;
+    }
+    if (pfunc == mirrorx_nofilter_trans) {
+        return MIRRORX_NOFILTER_TRANS;
+    }
+    // ClampX_ClampY ## xxx
+    if (pfunc == ClampX_ClampY_nofilter_scale_neon) {
+        return CLAMPX_CLAMPY_NOFILTER_SCALE_NEON;
+    }
+    if (pfunc == ClampX_ClampY_filter_scale_neon) {
+        return CLAMPX_CLAMPY_FILTER_SCALE_NEON;
+    }
+    if (pfunc == ClampX_ClampY_nofilter_affine_neon) {
+        return CLAMPX_CLAMPY_NOFILTER_AFFINE_NEON;
+    }
+    if (pfunc == ClampX_ClampY_filter_affine_neon) {
+        return CLAMPX_CLAMPY_FILTER_AFFINE_NEON;
+    }
+    if (pfunc == ClampX_ClampY_nofilter_persp_neon) {
+        return CLAMPX_CLAMPY_NOFILTER_PERSP_NEON;
+    }
+    if (pfunc == ClampX_ClampY_filter_persp_neon) {
+        return CLAMPX_CLAMPY_FILTER_PERSP_NEON;
+    }
+    // RepeatX_RepeatY ## xxx
+    if (pfunc == RepeatX_RepeatY_nofilter_scale_neon) {
+        return REPEATX_REPEATY_NOFILTER_SCALE_NEON;
+    }
+    if (pfunc == RepeatX_RepeatY_filter_scale) {
+        return REPEATX_REPEATY_FILTER_SCALE_NEON;
+    }
+    if (pfunc == RepeatX_RepeatY_nofilter_affine_neon) {
+        return REPEATX_REPEATY_NOFILTER_AFFINE_NEON;
+    }
+    if (pfunc == RepeatX_RepeatY_filter_affine) {
+        return REPEATX_REPEATY_FILTER_AFFINE_NEON;
+    }
+    if (pfunc == RepeatX_RepeatY_nofilter_persp_neon) {
+        return REPEATX_REPEATY_NOFILTER_PERSP_NEON;
+    }
+    if (pfunc == RepeatX_RepeatY_filter_persp) {
+        return REPEATX_REPEATY_FILTER_PERSP_NEON;
+    }
+    // GeneralXY ## xxx
+    if (pfunc == GeneralXY_nofilter_scale) {
+        return GENERALXY_NOFILTER_SCALE_NEON;
+    }
+    if (pfunc == GeneralXY_filter_scale) {
+        return GENERALXY_FILTER_SCALE_NEON;
+    }
+    if (pfunc == GeneralXY_nofilter_affine) {
+        return GENERALXY_NOFILTER_AFFINE_NEON;
+    }
+    if (pfunc == GeneralXY_filter_affine) {
+        return GENERALXY_FILTER_AFFINE_NEON;
+    }
+    if (pfunc == GeneralXY_nofilter_persp) {
+        return GENERALXY_NOFILTER_PERSP_NEON;
+    }
+    if (pfunc == GeneralXY_filter_persp) {
+        return GENERALXY_FILTER_PERSP_NEON;
+    }
+    return i;
+}
+
+void disp_matrix_proc_name(void *pfunc)
+{
+
+    if (pfunc == clampx_nofilter_trans) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "clampx_nofilter_trans");
+        return ;
+    } else if (pfunc == repeatx_nofilter_trans) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "repeatx_nofilter_trans");
+        return ;
+    } else if (pfunc == mirrorx_nofilter_trans) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "mirrorx_nofilter_trans");
+        return ;
+    } else
+    // ClampX_ClampY ## xxx
+    if (pfunc == ClampX_ClampY_nofilter_scale_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_nofilter_scale_neon");
+        return ;
+    } else if (pfunc == ClampX_ClampY_filter_scale_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_filter_scale_neon");
+        return ;
+    } else if (pfunc == ClampX_ClampY_nofilter_affine_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_nofilter_affine_neon");
+        return ;
+    } else if (pfunc == ClampX_ClampY_filter_affine_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_filter_affine_neon");
+        return ;
+    } else if (pfunc == ClampX_ClampY_nofilter_persp_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_nofilter_persp_neon");
+        return ;
+    } else if (pfunc == ClampX_ClampY_filter_persp_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "ClampX_ClampY_filter_persp_neon");
+        return ;
+    } else
+    // RepeatX_RepeatY ## xxx
+    if (pfunc == RepeatX_RepeatY_nofilter_scale_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_nofilter_scale_neon");
+        return ;
+    } else if (pfunc == RepeatX_RepeatY_filter_scale) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_filter_scale");
+        return ;
+    } else if (pfunc == RepeatX_RepeatY_nofilter_affine_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_nofilter_affine_neon");
+        return ;
+    } else if (pfunc == RepeatX_RepeatY_filter_affine) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_filter_affine");
+        return ;
+    } else if (pfunc == RepeatX_RepeatY_nofilter_persp_neon) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_nofilter_persp_neon");
+        return ; 
+    } else if (pfunc == RepeatX_RepeatY_filter_persp) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "RepeatX_RepeatY_filter_persp");
+        return ;
+    } else
+    // GeneralXY ## xxx
+    if (pfunc == GeneralXY_nofilter_scale) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_nofilter_scale");
+        return ;
+    } else if (pfunc == GeneralXY_filter_scale) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_filter_scale");
+        return ;
+    } else if (pfunc == GeneralXY_nofilter_affine) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_nofilter_affine");
+        return ;
+    } else if (pfunc == GeneralXY_filter_affine) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_filter_affine");
+        return ;
+    } else if (pfunc == GeneralXY_nofilter_persp) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_nofilter_persp");
+        return ;
+    } else if (pfunc == GeneralXY_filter_persp) {
+        LOGD_IF(OPEN_LOG, "MatrixProc:%s", "GeneralXY_filter_persp");
+        return ;
+    }
+}
 
 SkBitmapProcState::MatrixProc
 SkBitmapProcState::chooseMatrixProc(bool trivial_matrix) {

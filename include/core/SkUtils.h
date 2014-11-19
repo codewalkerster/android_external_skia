@@ -30,12 +30,22 @@ void sk_memset32_portable(uint32_t dst[], uint32_t value, int count);
 typedef void (*SkMemset32Proc)(uint32_t dst[], uint32_t value, int count);
 SkMemset32Proc SkMemset32GetPlatformProc();
 
+// memset operations
+//#include "cutils/memory.h"
+extern "C" void arm_memset16(uint16_t*, uint16_t, int);
+extern "C" void arm_memset32(uint32_t*, uint32_t, int);
+
+#define sk_memset16(dst, value, count)    arm_memset16(dst, value, count) 
+#define sk_memset32(dst, value, count)    arm_memset32(dst, value, count)
+
+#if 0
 #ifndef sk_memset16
 extern SkMemset16Proc sk_memset16;
 #endif
 
 #ifndef sk_memset32
 extern SkMemset32Proc sk_memset32;
+#endif
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////

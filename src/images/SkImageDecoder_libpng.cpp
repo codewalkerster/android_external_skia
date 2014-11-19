@@ -18,6 +18,7 @@
 #include "SkTemplates.h"
 #include "SkUtils.h"
 #include "transform_scanline.h"
+#include <cutils/log.h>
 
 extern "C" {
 #include "png.h"
@@ -140,7 +141,9 @@ static int sk_read_user_chunk(png_structp png_ptr, png_unknown_chunkp chunk) {
 }
 
 static void sk_error_fn(png_structp png_ptr, png_const_charp msg) {
+#if 1						// open this bug message
     SkDEBUGF(("------ png error %s\n", msg));
+#endif
     longjmp(png_jmpbuf(png_ptr), 1);
 }
 
@@ -669,6 +672,31 @@ bool SkPNGImageDecoder::decodePalette(png_structp png_ptr, png_infop info_ptr,
     return true;
 }
 
+int roundup(int orgW, int pixel_dep, int samplesize, int reqH)
+{
+    int dy = reqH > samplesize ? samplesize : reqH;             // min of reqH and samplesize
+    int dx = orgW > samplesize ? samplesize : orgW;             // min of orgW and samplesize
+    int buffer_need;
+    int buffer_malloc;
+
+    int tmp1 = reqH / dx;
+    int tmp2 = orgW / dy;
+
+    buffer_need = orgW * (pixel_dep / 8);
+    buffer_malloc = tmp1 * tmp2 * (pixel_dep / 8);
+    if (buffer_malloc < buffer_need) {
+        ALOGD("WARNING: buffer size is small than needed, reqH:%d, samplesize:%d, pix_dep:%d, orgW:%d",
+             reqH, samplesize, pixel_dep, orgW);
+        if (orgW % tmp2) {
+            reqH = (orgW / tmp2 + 1) * dx;
+        } else {
+            reqH = (orgW / tmp2) * dx;
+        }
+        ALOGD("WARNING: updated reqH:%d", reqH);
+    }
+    return reqH;    
+}
+
 #ifdef SK_BUILD_FOR_ANDROID
 
 bool SkPNGImageDecoder::onBuildTileIndex(SkStream* sk_stream, int *width, int *height) {
@@ -725,6 +753,9 @@ bool SkPNGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
         // returns false
         return false;
     }
+    int realHeight = rect.fBottom - rect.fTop;
+    int requestedHeight;
+    int scaledHeight;
 
     SkBitmap::Config    config;
     bool                hasAlpha = false;
@@ -735,7 +766,22 @@ bool SkPNGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
     }
 
     const int sampleSize = this->getSampleSize();
-    SkScaledBitmapSampler sampler(origWidth, rect.height(), sampleSize);
+
+    // we need to avoid buffer overflow
+    // buffer size is set by fHeight * fRowBytes = 
+    // requestedHeight / min(requestedHeight, sampleSize) * fRowBytes
+    // line read: origWidth * png_info->pixel_depth/ 8
+    requestedHeight = roundup(origWidth, info_ptr->pixel_depth, sampleSize, realHeight);
+    if (realHeight != requestedHeight) {
+        int dy = SkMin32(sampleSize, realHeight);  
+        scaledHeight = realHeight / dy;
+        ALOGD("realHeight:%d, requestedHeight:%d, scaledHeight:%d", realHeight, requestedHeight, scaledHeight);
+    } else {
+        int dy = SkMin32(sampleSize, requestedHeight);
+        scaledHeight = requestedHeight / dy;
+    }
+
+    SkScaledBitmapSampler sampler(origWidth, requestedHeight, sampleSize);
 
     SkBitmap decodedBitmap;
     decodedBitmap.setConfig(config, sampler.scaledWidth(), sampler.scaledHeight());
@@ -840,7 +886,14 @@ bool SkPNGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
         if (!sampler.begin(&decodedBitmap, sc, *this, ctLock.colors())) {
             return false;
         }
-        const int height = decodedBitmap.height();
+
+        /*
+         * when realHeight != requestedHeight, bitmap's height is bigger than real height.
+         * If use decodeBitmap's height to decode png will cause error of "Not enough 
+         * image data", so change height to scaledHeight.
+         */
+        //const int height = decodedBitmap->height();
+        const int height = scaledHeight; 
 
         if (number_passes > 1) {
             SkAutoMalloc storage(origWidth * origHeight * srcBytesPerPixel);

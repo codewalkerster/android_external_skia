@@ -86,6 +86,11 @@ inline void operator delete(void* p) {
 ///////////////////////////////////////////////////////////////////////////////
 
 #define SK_INIT_TO_AVOID_WARNING    = 0
+// add for debug
+#ifndef LOG_TAG
+#define LOG_TAG "skia"
+#endif
+// end 
 
 #ifndef SkDebugf
     void SkDebugf(const char format[], ...);

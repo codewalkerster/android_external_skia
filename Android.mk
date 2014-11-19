@@ -32,7 +32,7 @@ LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_ARM_MODE := thumb
+LOCAL_ARM_MODE := arm 
 
 # need a flag to tell the C side when we're on devices with large memory
 # budgets (i.e. larger than the low-end devices that initially shipped)
@@ -514,13 +514,17 @@ LOCAL_SRC_FILES += \
 
 ifeq ($(TARGET_ARCH),arm)
 
+$(info ----------------ARCH_ARM_HAVE_NEON: $(ARCH_ARM_HAVE_NEON))
 ifeq ($(ARCH_ARM_HAVE_NEON),true)
 LOCAL_SRC_FILES += \
 	src/opts/memset16_neon.S \
 	src/opts/memset32_neon.S \
-	src/opts/SkBitmapProcState_arm_neon.cpp \
-	src/opts/SkBitmapProcState_matrixProcs_neon.cpp \
-	src/opts/SkBlitRow_opts_arm_neon.cpp
+    src/opts/SkBitmapProcState_arm_neon.cpp \
+    src/opts/SkBitmapProcState_matrixProcs_neon.cpp \
+    src/opts/SkBlitRow_opts_arm_neon.cpp    \
+	src/opts/S32A_Opaque_BlitRow32_neon.S \
+    src/opts/S32A_Blend_BlitRow32_arm.S \
+	src/opts/S32A_D565_Opaque_arm.S 
 endif
 
 LOCAL_SRC_FILES += \

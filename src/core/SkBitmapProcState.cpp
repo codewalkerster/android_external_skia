@@ -14,6 +14,8 @@
 #include "SkBitmapScaler.h"
 #include "SkMipMap.h"
 #include "SkScaledImageCache.h"
+#include <cutils/log.h>
+
 
 #if !SK_ARM_NEON_IS_NONE
 // These are defined in src/opts/SkBitmapProcState_arm_neon.cpp
@@ -29,7 +31,7 @@ extern void  Clamp_SI8_opaque_D32_filter_DX_shaderproc_neon(const SkBitmapProcSt
 
 #define   NAME_WRAP(x)  x
 #include "SkBitmapProcState_filter.h"
-#include "SkBitmapProcState_procs.h"
+#include "SkBitmapProcState_procs_t.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -289,6 +291,178 @@ SkBitmapProcState::~SkBitmapProcState() {
     }
     SkDELETE(fBitmapFilter);
 }
+// tao.zeng, add for debug
+
+#define OPEN_LOG                                1
+extern void S32_Opaque_D32_filter_DX_shaderproc_neon(SkFixed fx,
+                                                     unsigned int subY,
+                                                     SkFixed dx,
+                                                     int count,
+                                                     const unsigned int* image0,
+                                                     const unsigned int* image1,
+                                                     unsigned int* colors);
+
+extern int getMatrixProcName(void *pfunc);
+extern void disp_matrix_proc_name(void *pfunc);
+
+#define CLAMPX_NOFILTER_TRANS                   0
+#define REPEATX_NOFILTER_TRANS                  1
+#define MIRRORX_NOFILTER_TRANS                  2
+#define CLAMPX_CLAMPY_NOFILTER_SCALE_NEON       3
+#define CLAMPX_CLAMPY_FILTER_SCALE_NEON         4
+#define CLAMPX_CLAMPY_NOFILTER_AFFINE_NEON      5
+#define CLAMPX_CLAMPY_FILTER_AFFINE_NEON        6
+#define CLAMPX_CLAMPY_NOFILTER_PERSP_NEON       7
+#define CLAMPX_CLAMPY_FILTER_PERSP_NEON         8
+#define REPEATX_REPEATY_NOFILTER_SCALE_NEON     9 
+#define REPEATX_REPEATY_FILTER_SCALE_NEON       10
+#define REPEATX_REPEATY_NOFILTER_AFFINE_NEON    11
+#define REPEATX_REPEATY_FILTER_AFFINE_NEON      12
+#define REPEATX_REPEATY_NOFILTER_PERSP_NEON     13
+#define REPEATX_REPEATY_FILTER_PERSP_NEON       14
+#define GENERALXY_NOFILTER_SCALE_NEON           15 
+#define GENERALXY_FILTER_SCALE_NEON             16
+#define GENERALXY_NOFILTER_AFFINE_NEON          17
+#define GENERALXY_FILTER_AFFINE_NEON            18
+#define GENERALXY_NOFILTER_PERSP_NEON           19
+#define GENERALXY_FILTER_PERSP_NEON             20 
+
+// function declaration
+// S32_opaque_D32_nofilter_DX_t + CLAMPX_CLAMPY_NOFILTER_SCALE_NEON
+void ClampX_S32_D32_nofilter_scale_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// S16_opaque_D32_nofilter_DX_t + CLAMPX_CLAMPY_NOFILTER_SCALE_NEON
+void ClampX_S16_D32_nofilter_scale_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// S16_opaque_D32_nofilter_DX + clampx_nofilter_trans 
+void ClampX_S16_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// SI8_opaque_D32_nofilter_DX + ClampX_ClampY_nofilter_scale_neon
+void ClampX_SI8_D32_nofilter_scale_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// S32_alpha_D32_nofilter_DX + ClampX_ClampY_nofilter_scale_neon
+void ClampX_S32_Alpha_D32_nofilter_scale_t(const     SkBitmapProcState& s,
+                                           int       x,
+                                           int       y,
+                                           SkPMColor dstC[],
+                                           int       count);
+
+// PERSP_NOFILTER_NAME + S32_opaque_D32_nofilter_DXDY
+void ClampXY_S32_D32_nofilter_persp_t(const     SkBitmapProcState& s,
+                                      int       x, 
+                                      int       y,
+                                      SkPMColor dstC[],
+                                      int       count);
+
+// PERSP_NOFILTER_NAME + S32_alpha_D32_nofilter_DXDY
+void ClampXY_S32A_D32_nofilter_persp_t(const     SkBitmapProcState& s,
+                                       int       x,
+                                       int       y,
+                                       SkPMColor dstC[],
+                                       int       count);
+
+// S32_alpha_D32_filter_DX + ClampX_ClampY_filter_scale_neon
+void Clamp_S32A_D32_filter_sale_t(const     SkBitmapProcState& s,
+                                  int       x,
+                                  int       y,
+                                  SkPMColor dstC[],
+                                  int       count);
+
+// S32_opaque_D32_filter_DXDY + ClampX_ClampY_filter_persp_neon
+void ClampXY_S32_D32_filter_persp_t(const     SkBitmapProcState& s,
+                                    int       x,
+                                    int       y,
+                                    SkPMColor dstC[],
+                                    int       count);
+
+// S32_alpha_D32_filter_DXDY + ClampX_ClampY_filter_persp_neon
+void ClampXY_S32A_D32_filter_persp_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// S32_opaque_D32_nofilter_DX + repeatx_nofilter_trans
+void Repeatx_S32_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                      int       x,
+                                      int       y,
+                                      SkPMColor dstC[],
+                                      int       count);
+
+// S32_opaque_D32_nofilter_DX + clampx_nofilter_trans
+void ClampX_S32_D32_nofilter_trans_t(const     SkBitmapProcState& s,
+                                     int       x,
+                                     int       y,
+                                     SkPMColor dstC[],
+                                     int       count);
+
+// SI8_opaque_D32_filter_DX + ClampX_ClampY_filter_scale_neon
+void Clamp_SI8_D32_filter_sale_t(const     SkBitmapProcState& s,
+                                 int       x,
+                                 int       y,
+                                 SkPMColor dstC[],
+                                 int       count);
+
+// SI8_opaque_D32_filter_DX + RepeatX_RepeatY_filter_scale
+void RepeatX_SI8_D32_filter_scale_t(const     SkBitmapProcState& s,
+                                    int       x,
+                                    int       y,
+                                    SkPMColor dstC[],
+                                    int       count);
+
+// SI8_opaque_D32_nofilter_DX + RepeatX_RepeatY_nofilter_scale_neon
+void RepeatX_SI8_D32_nofilter_scale_t(const     SkBitmapProcState& s,
+                                      int       x,
+                                      int       y,
+                                      SkPMColor dstC[],
+                                      int       count);
+
+void disp_sample_func_name(int index, void *p)
+{
+    char *stype[] = {"S32", "S16", "SI8", "S4444", "SA8"};
+    ALOGD_IF(OPEN_LOG, "fSample32: %s_%s_D32_%s_%s", 
+             stype[index / 8], 
+             (index & 1) ? "alpha"  : "opaque",
+             (index & 4) ? "filter" : "nofilter",
+             (index & 2) ? "DX"     : "DXDY");
+}
+
+/*
+ * possible combine:
+ * S32_alpha_D32_nofilter_DX     + ClampX_ClampY_nofilter_scale_neon  + h
+ * SI8_opaque_D32_nofilter_DX    + ClampX_ClampY_nofilter_scale_neon  + h
+ * SI8_opaque_D32_filter_DX      + ClampX_ClampY_nofilter_scale_neon  + l
+ * 
+ * S32_opaque_D32_filter_DX      + ClampX_ClampY_filter_scale_neon    + h
+ * S32_alpha_D32_filter_DX       + ClampX_ClampY_filter_scale_neon    + h
+ * S16_opaque_D32_filter_DX      + ClampX_ClampY_filter_scale_neon    + h
+ * SI8_opaque_D32_filter_DX      + ClampX_ClampY_filter_scale_neon    + h
+ * 
+ * S32_opaque_D32_filter_DXDY    + ClampX_ClampY_filter_affine_neon   + h
+ * S32_alpha_D32_filter_DXDY     + ClampX_ClampY_filter_affine_neon   + n
+ * 
+ * S32_opaque_D32_nofilter_DX    + RepeatX_RepeatY_nofilter_scale_neon + h
+ * SI8_opaque_D32_nofilter_DX    + RepeatX_RepeatY_nofilter_scale_neon + n
+ *
+ * S32_opaque_D32_filter_DXDY    + ClampX_ClampY_filter_persp_neon
+ * S32_alpha_D32_filter_DXDY     + ClampX_ClampY_filter_persp_neon
+ */
 
 bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
     if (fOrigBitmap.width() == 0 || fOrigBitmap.height() == 0) {
@@ -440,11 +614,12 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
                 return false;
         }
 
-    #if !SK_ARM_NEON_IS_ALWAYS
+    //#if !SK_ARM_NEON_IS_ALWAYS
         static const SampleProc32 gSkBitmapProcStateSample32[] = {
             S32_opaque_D32_nofilter_DXDY,
             S32_alpha_D32_nofilter_DXDY,
-            S32_opaque_D32_nofilter_DX,
+          //S32_opaque_D32_nofilter_DX,
+            S32_opaque_D32_nofilter_DX_t,                                   // replaced
             S32_alpha_D32_nofilter_DX,
             S32_opaque_D32_filter_DXDY,
             S32_alpha_D32_filter_DXDY,
@@ -453,7 +628,8 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
 
             S16_opaque_D32_nofilter_DXDY,
             S16_alpha_D32_nofilter_DXDY,
-            S16_opaque_D32_nofilter_DX,
+          //S16_opaque_D32_nofilter_DX,                                     // 
+            S16_opaque_D32_nofilter_DX_t,                                   // replaced by optimzed function 
             S16_alpha_D32_nofilter_DX,
             S16_opaque_D32_filter_DXDY,
             S16_alpha_D32_filter_DXDY,
@@ -466,7 +642,8 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
             SI8_alpha_D32_nofilter_DX,
             SI8_opaque_D32_filter_DXDY,
             SI8_alpha_D32_filter_DXDY,
-            SI8_opaque_D32_filter_DX,
+          //SI8_opaque_D32_filter_DX,
+            SI8_opaque_D32_filter_DX_t,                                     // replaced
             SI8_alpha_D32_filter_DX,
 
             S4444_opaque_D32_nofilter_DXDY,
@@ -510,24 +687,137 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
             // Don't support A8 -> 565
             NULL, NULL, NULL, NULL
         };
-    #endif
+    //#endif
 
-        fSampleProc32 = SK_ARM_NEON_WRAP(gSkBitmapProcStateSample32)[index];
-        index >>= 1;    // shift away any opaque/alpha distinction
-        fSampleProc16 = SK_ARM_NEON_WRAP(gSkBitmapProcStateSample16)[index];
+        //fSampleProc32 = SK_ARM_NEON_WRAP(gSkBitmapProcStateSample32)[index];
+        fSampleProc32 = gSkBitmapProcStateSample32[index];
+        //index >>= 1;    // shift away any opaque/alpha distinction
+        //fSampleProc16 = SK_ARM_NEON_WRAP(gSkBitmapProcStateSample16)[index >> 1];
+        fSampleProc16 = gSkBitmapProcStateSample16[index >> 1];
 
+        bool compared = 0;                                                  //  for debug
         // our special-case shaderprocs
-        if (SK_ARM_NEON_WRAP(S16_D16_filter_DX) == fSampleProc16) {
+        if (S16_D16_filter_DX == fSampleProc16) {
             if (clampClamp) {
-                fShaderProc16 = SK_ARM_NEON_WRAP(Clamp_S16_D16_filter_DX_shaderproc);
+                fShaderProc16 = Clamp_S16_D16_filter_DX_shaderproc;
             } else if (SkShader::kRepeat_TileMode == fTileModeX &&
                        SkShader::kRepeat_TileMode == fTileModeY) {
-                fShaderProc16 = SK_ARM_NEON_WRAP(Repeat_S16_D16_filter_DX_shaderproc);
+                fShaderProc16 = Repeat_S16_D16_filter_DX_shaderproc;
             }
-        } else if (SK_ARM_NEON_WRAP(SI8_opaque_D32_filter_DX) == fSampleProc32 && clampClamp) {
-            fShaderProc32 = SK_ARM_NEON_WRAP(Clamp_SI8_opaque_D32_filter_DX_shaderproc);
+        } else if (SI8_opaque_D32_filter_DX_t == fSampleProc32 && clampClamp) {
+            fShaderProc32 = Clamp_SI8_opaque_D32_filter_DX_shaderproc;
+            compared = 1;
+        }
+    #if defined(__ARM_HAVE_NEON)
+        // tao.zeng, add to combine opreration
+        else if (S32_opaque_D32_filter_DX == fSampleProc32 && clampClamp) {
+            fShaderProc32 = S32_Opaque_D32_filter_DX_shaderproc;
+            compared = 1;
         }
 
+        if ((S32_opaque_D32_nofilter_DX_t == fSampleProc32) && 
+            (CLAMPX_CLAMPY_NOFILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_S32_D32_nofilter_scale_t;
+            compared = 1;
+        }
+
+        if ((S16_opaque_D32_nofilter_DX_t == fSampleProc32) &&
+            (CLAMPX_CLAMPY_NOFILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_S16_D32_nofilter_scale_t;
+            compared = 1;
+        }
+
+        if ((S16_opaque_D32_nofilter_DX_t == fSampleProc32) && 
+            (CLAMPX_NOFILTER_TRANS == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_S16_D32_nofilter_trans_t;    
+            compared = 1;
+        }
+
+        // do something to optimize this case ? hardly appear
+        if ((SI8_opaque_D32_nofilter_DX == fSampleProc32) && 
+            (CLAMPX_CLAMPY_NOFILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_SI8_D32_nofilter_scale_t;    
+            compared = 1;
+        }
+
+        if ((S32_alpha_D32_nofilter_DX == fSampleProc32) && 
+            (CLAMPX_CLAMPY_NOFILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_S32_Alpha_D32_nofilter_scale_t;
+            compared = 1;
+        }
+
+        // need improve this case
+        if ((S32_opaque_D32_nofilter_DXDY == fSampleProc32) &&
+            (CLAMPX_CLAMPY_NOFILTER_PERSP_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampXY_S32_D32_nofilter_persp_t; 
+            compared = 1;
+        }
+
+        // need improve this case
+        if ((S32_alpha_D32_nofilter_DXDY == fSampleProc32) &&
+            (CLAMPX_CLAMPY_NOFILTER_PERSP_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampXY_S32A_D32_nofilter_persp_t; 
+            compared = 1;
+        }
+
+        if ((S32_alpha_D32_filter_DX == fSampleProc32) &&
+            (CLAMPX_CLAMPY_FILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = Clamp_S32A_D32_filter_sale_t; 
+            compared = 1;
+        }
+
+        // need optimize this case
+       if ((S32_opaque_D32_filter_DXDY == fSampleProc32) &&
+            (CLAMPX_CLAMPY_FILTER_PERSP_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampXY_S32_D32_filter_persp_t; 
+            compared = 1;
+        }
+
+        // need optimize this case
+        if ((S32_alpha_D32_filter_DXDY == fSampleProc32) &&
+            (CLAMPX_CLAMPY_FILTER_PERSP_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampXY_S32A_D32_filter_persp_t; 
+            compared = 1;
+        }
+
+        if ((S32_opaque_D32_nofilter_DX_t == fSampleProc32) &&
+            (REPEATX_NOFILTER_TRANS == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = Repeatx_S32_D32_nofilter_trans_t; 
+            compared = 1;
+        }
+
+        if ((S32_opaque_D32_nofilter_DX_t == fSampleProc32) &&
+            (CLAMPX_NOFILTER_TRANS == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = ClampX_S32_D32_nofilter_trans_t; 
+            compared = 1;
+        }
+
+        // this case still have bug....
+    //  if ((SI8_opaque_D32_filter_DX_t == fSampleProc32) &&
+    //      (CLAMPX_CLAMPY_FILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+    //      fShaderProc32 = Clamp_SI8_D32_filter_sale_t; 
+    //      compared = 1;
+    //  }
+
+        if ((SI8_opaque_D32_filter_DX_t == fSampleProc32) &&
+            (REPEATX_REPEATY_FILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = RepeatX_SI8_D32_filter_scale_t; 
+            compared = 1;
+        }
+
+        if ((SI8_opaque_D32_nofilter_DX == fSampleProc32) &&
+            (REPEATX_REPEATY_NOFILTER_SCALE_NEON == getMatrixProcName((void *)fMatrixProc))) {
+            fShaderProc32 = RepeatX_SI8_D32_nofilter_scale_t; 
+            compared = 1;
+        }
+
+    #if 0
+        if (!compared) {
+            disp_sample_func_name(index, (void *)fSampleProc32);           // tao.zeng, for debug
+            disp_matrix_proc_name((void *)fMatrixProc);
+        }
+    #endif
+    #endif
         if (NULL == fShaderProc32) {
             fShaderProc32 = this->chooseShaderProc32();
         }
