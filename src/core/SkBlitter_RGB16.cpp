@@ -555,11 +555,160 @@ static inline void blend32_16_row(SkPMColor src, uint16_t dst[], int count) {
     SkASSERT(count > 0);
     uint32_t src_expand = pmcolor_to_expand16(src);
     unsigned scale = SkAlpha255To256(0xFF - SkGetPackedA32(src)) >> 3;
+#if defined(__ARM_HAVE_NEON)
+    asm volatile (
+        /*
+         * tao.zeng, optimize this function by NEON
+         * Register Allocate:
+         * q0  --> Mask
+         * q2  --> dst[0 --  7]
+         * q8  --> src_expand
+         * q9 - q12 --> tmp
+         */
+        "vpush          {s16}                       \n"
+        "vmov.i32       q0, #0x3f                   \n"
+        "vmov           s16, %[scale]               \n"         // s16 = [scale]
+        "vdup.32        q8, %[src_expand]           \n"
+        "pld            [%[dst], #128]              \n"
+        "cmp            %[count], #16               \n"
+        "vshl.i32       q0,  q0, #5                 \n"         // q0  = mask of G
+        "blt            blend32_16_row_less_16      \n"
+        // main loop, process 16 data each loop
+    "blend32_16_row_loop16:                         \n"
+        "vld1.16        {d4, d5, d6, d7}, [%[dst]]  \n"         // load 16 dst data
+        "pld            [%[dst], #128]              \n"         // preload next data
+        "sub            %[count], #16               \n"
+        "cmp            %[count], #16               \n"
+
+        "vmovl.u16      q13, d4                     \n"         // expand to 32 bits
+        "vmovl.u16      q14, d5                     \n"
+        "vmovl.u16      q15, d6                     \n"
+        "vmovl.u16      q1,  d7                     \n"
+        "vand.u32       q9,  q13, q0                \n"         // get G
+        "vand.u32       q10, q14, q0                \n"
+        "vand.u32       q11, q15, q0                \n"
+        "vand.u32       q12, q1,  q0                \n"
+        "vbic.u32       q13, q13, q0                \n"         // clear G
+        "vbic.u32       q14, q14, q0                \n"
+        "vbic.u32       q15, q15, q0                \n"
+        "vbic.u32       q1,  q1,  q0                \n"
+        "vsli.32        q13, q9,  #16               \n"         // insert G to high bits
+        "vsli.32        q14, q10, #16               \n"
+        "vsli.32        q15, q11, #16               \n"
+        "vsli.32        q1,  q12, #16               \n"
+        "vmul.i32       q13, q13, d8[0]             \n"         // scale
+        "vmul.i32       q14, q14, d8[0]             \n"
+        "vmul.i32       q15, q15, d8[0]             \n"
+        "vmul.i32       q1,  q1,  d8[0]             \n"
+        "vadd.i32       q13, q13, q8                \n"         // add source
+        "vadd.i32       q14, q14, q8                \n"
+        "vadd.i32       q15, q15, q8                \n"
+        "vadd.i32       q1,  q1,  q8                \n"
+        "vshr.u32       q13, q13, #5                \n"         // scale back
+        "vshr.u32       q14, q14, #5                \n"
+        "vshr.u32       q15, q15, #5                \n"
+        "vshr.u32       q1,  q1,  #5                \n"
+        "vshr.u32       q9,  q13, #16               \n"         // get scaled G
+        "vshr.u32       q10, q14, #16               \n"
+        "vshr.u32       q11, q15, #16               \n"
+        "vshr.u32       q12, q1,  #16               \n"
+        "vbit.u32       q13, q9,  q0                \n"         // insert G
+        "vbit.u32       q14, q10, q0                \n"
+        "vbit.u32       q15, q11, q0                \n"
+        "vbit.u32       q1,  q12, q0                \n"
+        "vmovn.i32      d4,  q13                    \n"         // narrow data
+        "vmovn.i32      d5,  q14                    \n"
+        "vmovn.i32      d6,  q15                    \n"
+        "vmovn.i32      d7,  q1                     \n"
+        "vst1.16        {d4, d5, d6, d7}, [%[dst]]! \n"
+        "bge            blend32_16_row_loop16       \n"
+        "cmp            %[count], #0                \n"
+        "beq            out                         \n"
+
+    "blend32_16_row_less_16:                        \n"
+        "cmp            %[count], #8                \n"
+        "blt            blend32_16_row_less_8       \n"
+        "vld1.16        {d4, d5}, [%[dst]]          \n"
+        "subs           %[count], #8                \n"
+
+        "vmovl.u16      q13, d4                     \n"         // expand to 32 bits
+        "vmovl.u16      q14, d5                     \n"
+        "vand.u32       q9,  q13, q0                \n"         // get G
+        "vand.u32       q10, q14, q0                \n"
+        "vbic.u32       q13, q13, q0                \n"         // clear G
+        "vbic.u32       q14, q14, q0                \n"
+        "vsli.32        q13, q9,  #16               \n"         // insert G to high bits
+        "vsli.32        q14, q10, #16               \n"
+        "vmul.i32       q13, q13, d8[0]             \n"         // scale
+        "vmul.i32       q14, q14, d8[0]             \n"
+        "vadd.i32       q13, q13, q8                \n"         // add source
+        "vadd.i32       q14, q14, q8                \n"
+        "vshr.u32       q13, q13, #5                \n"         // scale back
+        "vshr.u32       q14, q14, #5                \n"
+        "vshr.u32       q9,  q13, #16               \n"         // get scaled G
+        "vshr.u32       q10, q14, #16               \n"
+        "vbit.u32       q13, q9,  q0                \n"         // insert back to result
+        "vbit.u32       q14, q10, q0                \n"
+        "vmovn.i32      d4,  q13                    \n"         // narrow data
+        "vmovn.i32      d5,  q14                    \n"
+        "vst1.16        {d4, d5}, [%[dst]]!         \n"
+        "beq            out                         \n"
+
+    "blend32_16_row_less_8:                         \n"
+        "cmp            %[count], #4                \n"
+        "blt            blend32_16_row_less_4       \n"
+        "vld1.16        {d4}, [%[dst]]              \n"
+        "b              blend32_16_row_loop_1       \n"
+
+    "blend32_16_row_less_4:                         \n"
+        "cmp            %[count], #2                \n"
+        "blt            blend32_16_row_less_2       \n"
+        "vld1.32        {d4[0]}, [%[dst]]           \n"
+        "b              blend32_16_row_loop_1       \n"
+
+    "blend32_16_row_less_2:                         \n"
+        "vld1.16        {d4[0]}, [%[dst]]           \n"
+
+    "blend32_16_row_loop_1:                         \n"
+        "vmovl.u16      q13, d4                     \n"         // expand to 32 bits
+        "vand.u32       q9,  q13,  q0               \n"         // get G
+        "vbic.u32       q13, q13,  q0               \n"         // clear G
+        "vsli.32        q13, q9,  #16               \n"         // insert G to high bits
+        "vmul.i32       q13, q13, d8[0]             \n"         // scale
+        "vadd.i32       q13, q13, q8                \n"         // add source
+        "vshr.u32       q13, q13, #5                \n"         // scale back
+        "vshr.u32       q9,  q13, #16               \n"         // get scaled G
+        "vbit.u32       q13, q9,  q0                \n"         // insert back to result
+        "vmovn.i32      d4,  q13                    \n"         // narrow data
+        "cmp            %[count], #4                \n"
+        "blt            store_less_4                \n"
+        "vst1.16        {d4}, [%[dst]]!             \n"
+        "subs           %[count], #4                \n"
+        "beq            out                         \n"
+        "b              blend32_16_row_less_4       \n"
+    "store_less_4:                                  \n"
+        "cmp            %[count], #2                \n"
+        "blt            store_less_2                \n"
+        "vst1.32        {d4[0]}, [%[dst]]!          \n"
+        "subs           %[count], #2                \n"
+        "beq            out                         \n"
+        "b              blend32_16_row_less_2       \n"
+    "store_less_2:                                  \n"
+        "vst1.16        {d4[0]}, [%[dst]]!          \n"
+
+    "out:                                           \n"
+        "vpop           {s16}                       \n"
+        :
+        :[scale] "r" (scale), [dst] "r" (dst), [count] "r" (count), [src_expand] "r"(src_expand)
+        :"memory"
+    );
+#else
     do {
         uint32_t dst_expand = SkExpand_rgb_16(*dst) * scale;
         *dst = SkCompact_rgb_16((src_expand + dst_expand) >> 5);
         dst += 1;
     } while (--count != 0);
+#endif
 }
 
 void SkRGB16_Blitter::blitH(int x, int y, int width) {

@@ -22,14 +22,6 @@ SkMemset16Proc SkMemset16GetPlatformProc() {
     // FIXME: memset.arm.S is using syntax incompatible with XCode
 #if !defined(SK_CPU_LENDIAN) || defined(SK_BUILD_FOR_IOS)
     return NULL;
-#elif SK_ARM_NEON_IS_DYNAMIC
-    if (sk_cpu_arm_has_neon()) {
-        return memset16_neon;
-    } else {
-        return arm_memset16;
-    }
-#elif SK_ARM_NEON_IS_ALWAYS
-    return memset16_neon;
 #else
     return arm_memset16;
 #endif
@@ -39,14 +31,6 @@ SkMemset32Proc SkMemset32GetPlatformProc() {
     // FIXME: memset.arm.S is using syntax incompatible with XCode
 #if !defined(SK_CPU_LENDIAN) || defined(SK_BUILD_FOR_IOS)
     return NULL;
-#elif SK_ARM_NEON_IS_DYNAMIC
-    if (sk_cpu_arm_has_neon()) {
-        return memset32_neon;
-    } else {
-        return arm_memset32;
-    }
-#elif SK_ARM_NEON_IS_ALWAYS
-    return memset32_neon;
 #else
     return arm_memset32;
 #endif

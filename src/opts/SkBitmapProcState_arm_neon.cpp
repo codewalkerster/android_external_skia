@@ -24,7 +24,7 @@ extern const SkBitmapProcState::SampleProc16 gSkBitmapProcStateSample16_neon[];
 const SkBitmapProcState::SampleProc32 gSkBitmapProcStateSample32_neon[] = {
     S32_opaque_D32_nofilter_DXDY_neon,
     S32_alpha_D32_nofilter_DXDY_neon,
-    S32_opaque_D32_nofilter_DX_neon,
+    S32_opaque_D32_nofilter_DX_t_neon,
     S32_alpha_D32_nofilter_DX_neon,
     S32_opaque_D32_filter_DXDY_neon,
     S32_alpha_D32_filter_DXDY_neon,
@@ -33,7 +33,7 @@ const SkBitmapProcState::SampleProc32 gSkBitmapProcStateSample32_neon[] = {
 
     S16_opaque_D32_nofilter_DXDY_neon,
     S16_alpha_D32_nofilter_DXDY_neon,
-    S16_opaque_D32_nofilter_DX_neon,
+    S16_opaque_D32_nofilter_DX_t_neon,
     S16_alpha_D32_nofilter_DX_neon,
     S16_opaque_D32_filter_DXDY_neon,
     S16_alpha_D32_filter_DXDY_neon,
@@ -46,7 +46,7 @@ const SkBitmapProcState::SampleProc32 gSkBitmapProcStateSample32_neon[] = {
     SI8_alpha_D32_nofilter_DX_neon,
     SI8_opaque_D32_filter_DXDY_neon,
     SI8_alpha_D32_filter_DXDY_neon,
-    SI8_opaque_D32_filter_DX_neon,
+    SI8_opaque_D32_filter_DX_t_neon,
     SI8_alpha_D32_filter_DX_neon,
 
     S4444_opaque_D32_nofilter_DXDY_neon,

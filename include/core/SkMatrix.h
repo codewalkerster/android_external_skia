@@ -605,6 +605,7 @@ public:
         return result;
     }
 
+    static void Persp_xy(const SkMatrix&, SkScalar, SkScalar, SkPoint*);
     /**
      * Testing routine; the matrix's type cache should never need to be
      * manually invalidated during normal use.
@@ -697,7 +698,6 @@ private:
     static void ScaleTrans_xy(const SkMatrix&, SkScalar, SkScalar, SkPoint*);
     static void Rot_xy(const SkMatrix&, SkScalar, SkScalar, SkPoint*);
     static void RotTrans_xy(const SkMatrix&, SkScalar, SkScalar, SkPoint*);
-    static void Persp_xy(const SkMatrix&, SkScalar, SkScalar, SkPoint*);
 
     static const MapXYProc gMapXYProcs[];
 

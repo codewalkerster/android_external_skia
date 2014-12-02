@@ -15,7 +15,7 @@
 #include "SkMipMap.h"
 #include "SkPixelRef.h"
 #include "SkScaledImageCache.h"
-#include "SkImageEncoder.h"
+#include <cutils/log.h>
 
 #if !SK_ARM_NEON_IS_NONE
 // These are defined in src/opts/SkBitmapProcState_arm_neon.cpp
@@ -384,6 +384,9 @@ SkBitmapProcState::~SkBitmapProcState() {
     SkDELETE(fBitmapFilter);
 }
 
+extern SkBitmapProcState::ShaderProc32 SkBitmap_find_merge_proc(SkBitmapProcState::SampleProc32 fSampleProc32,
+                                                                bool clampClamp,
+                                                                SkBitmapProcState::MatrixProc fMatrixProc);
 bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
     SkASSERT(fOrigBitmap.width() && fOrigBitmap.height());
 
@@ -628,6 +631,11 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
             fShaderProc32 = SK_ARM_NEON_WRAP(Clamp_SI8_opaque_D32_filter_DX_shaderproc);
         }
 
+    #if !SK_ARM_NEON_IS_NONE
+        if (fShaderProc32 == NULL) {
+            fShaderProc32 = SkBitmap_find_merge_proc(fSampleProc32, clampClamp, fMatrixProc);
+        }
+    #endif
         if (NULL == fShaderProc32) {
             fShaderProc32 = this->chooseShaderProc32();
         }

@@ -136,52 +136,56 @@ void SI8_opaque_D32_nofilter_DX_arm(const SkBitmapProcState& s,
         const uint16_t* xx = (const uint16_t*)(xy + 1);
 
         asm volatile (
-            "subs       %[count], %[count], #8        \n\t"   // decrement count by 8, set flags
-            "blt        2f                            \n\t"   // if count < 0, branch to singles
-            "1:                                       \n\t"   // eights loop
-            "ldmia      %[xx]!, {r5, r7, r9, r11}     \n\t"   // load ptrs to pixels 0-7
-            "uxth       r4, r5                        \n\t"   // extract ptr 0
-            "mov        r5, r5, lsr #16               \n\t"   // extract ptr 1
-            "uxth       r6, r7                        \n\t"   // extract ptr 2
-            "mov        r7, r7, lsr #16               \n\t"   // extract ptr 3
-            "ldrb       r4, [%[srcAddr], r4]          \n\t"   // load pixel 0 from image
-            "uxth       r8, r9                        \n\t"   // extract ptr 4
-            "ldrb       r5, [%[srcAddr], r5]          \n\t"   // load pixel 1 from image
-            "mov        r9, r9, lsr #16               \n\t"   // extract ptr 5
-            "ldrb       r6, [%[srcAddr], r6]          \n\t"   // load pixel 2 from image
-            "uxth       r10, r11                      \n\t"   // extract ptr 6
-            "ldrb       r7, [%[srcAddr], r7]          \n\t"   // load pixel 3 from image
-            "mov        r11, r11, lsr #16             \n\t"   // extract ptr 7
-            "ldrb       r8, [%[srcAddr], r8]          \n\t"   // load pixel 4 from image
-            "ldrb       r9, [%[srcAddr], r9]          \n\t"   // load pixel 5 from image
-            "ldrb       r10, [%[srcAddr], r10]        \n\t"   // load pixel 6 from image
-            "ldrb       r11, [%[srcAddr], r11]        \n\t"   // load pixel 7 from image
-            "ldr        r4, [%[table], r4, lsl #2]    \n\t"   // load pixel 0 SkPMColor from colmap
-            "ldr        r5, [%[table], r5, lsl #2]    \n\t"   // load pixel 1 SkPMColor from colmap
-            "ldr        r6, [%[table], r6, lsl #2]    \n\t"   // load pixel 2 SkPMColor from colmap
-            "ldr        r7, [%[table], r7, lsl #2]    \n\t"   // load pixel 3 SkPMColor from colmap
-            "ldr        r8, [%[table], r8, lsl #2]    \n\t"   // load pixel 4 SkPMColor from colmap
-            "ldr        r9, [%[table], r9, lsl #2]    \n\t"   // load pixel 5 SkPMColor from colmap
-            "ldr        r10, [%[table], r10, lsl #2]  \n\t"   // load pixel 6 SkPMColor from colmap
-            "ldr        r11, [%[table], r11, lsl #2]  \n\t"   // load pixel 7 SkPMColor from colmap
-            "subs       %[count], %[count], #8        \n\t"   // decrement loop counter
-            "stmia      %[colors]!, {r4-r11}          \n\t"   // store 8 pixels
-            "bge        1b                            \n\t"   // loop if counter >= 0
-            "2:                                       \n\t"
-            "adds       %[count], %[count], #8        \n\t"   // fix up counter, set flags
-            "beq        4f                            \n\t"   // if count == 0, branch to exit
-            "3:                                       \n\t"   // singles loop
-            "ldrh       r4, [%[xx]], #2               \n\t"   // load pixel ptr
-            "subs       %[count], %[count], #1        \n\t"   // decrement loop counter
-            "ldrb       r5, [%[srcAddr], r4]          \n\t"   // load pixel from image
-            "ldr        r6, [%[table], r5, lsl #2]    \n\t"   // load SkPMColor from colmap
-            "str        r6, [%[colors]], #4           \n\t"   // store pixel, update ptr
-            "bne        3b                            \n\t"   // loop if counter != 0
-            "4:                                       \n\t"   // exit
-            : [xx] "+r" (xx), [count] "+r" (count), [colors] "+r" (colors)
-            : [table] "r" (table), [srcAddr] "r" (srcAddr)
-            : "memory", "cc", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11"
-        );
+                      "subs       %[count], %[count], #8          \n\t"   // decrement count by 8, set flags
+                      "blt        2f                              \n\t"   // if count < 0, branch to singles
+                      "ldmia      %[xx]!, {r5, r7, r9, r11}       \n\t"   // load ptrs to pixels 0-7
+                      "ldr        r14, =0xffff                    \n\t"   // r14 is mask
+                      "1:                                         \n\t"   // eights loop
+                      "subs       %[count], %[count], #8          \n\t"   // decrement loop counter
+                      "pld        [%[xx], #128]                   \n\t"   // add by tao.zeng@amlogic.com
+                      "and        r4, r5, r14                     \n\t"   // extract ptr 0
+                      "mov        r5, r5, lsr #16                 \n\t"   // extract ptr 1
+                      "and        r6, r7, r14                     \n\t"   // extract ptr 2
+                      "mov        r7, r7, lsr #16                 \n\t"   // extract ptr 3
+                      "and        r8, r9, r14                     \n\t"   // extract ptr 4
+                      "mov        r9, r9, lsr #16                 \n\t"   // extract ptr 5
+                      "and        r10, r11, r14                   \n\t"   // extract ptr 6
+                      "mov        r11, r11, lsr #16               \n\t"   // extract ptr 7
+                      "ldrb       r4, [%[srcAddr], r4]            \n\t"   // load pixel 0 from image
+                      "ldrb       r5, [%[srcAddr], r5]            \n\t"   // load pixel 1 from image
+                      "ldrb       r6, [%[srcAddr], r6]            \n\t"   // load pixel 2 from image
+                      "ldrb       r7, [%[srcAddr], r7]            \n\t"   // load pixel 3 from image
+                      "ldrb       r8, [%[srcAddr], r8]            \n\t"   // load pixel 4 from image
+                      "ldrb       r9, [%[srcAddr], r9]            \n\t"   // load pixel 5 from image
+                      "ldrb       r10, [%[srcAddr], r10]          \n\t"   // load pixel 6 from image
+                      "ldrb       r11, [%[srcAddr], r11]          \n\t"   // load pixel 7 from image
+                      "ldr        r4, [%[table], r4, lsl #2]      \n\t"   // load pixel 0 SkPMColor from colmap
+                      "ldr        r5, [%[table], r5, lsl #2]      \n\t"   // load pixel 1 SkPMColor from colmap
+                      "ldr        r6, [%[table], r6, lsl #2]      \n\t"   // load pixel 2 SkPMColor from colmap
+                      "ldr        r7, [%[table], r7, lsl #2]      \n\t"   // load pixel 3 SkPMColor from colmap
+                      "ldr        r8, [%[table], r8, lsl #2]      \n\t"   // load pixel 4 SkPMColor from colmap
+                      "ldr        r9, [%[table], r9, lsl #2]      \n\t"   // load pixel 5 SkPMColor from colmap
+                      "ldr        r10, [%[table], r10, lsl #2]    \n\t"   // load pixel 6 SkPMColor from colmap
+                      "ldr        r11, [%[table], r11, lsl #2]    \n\t"   // load pixel 7 SkPMColor from colmap
+                      "stmia      %[colors]!, {r4-r11}            \n\t"   // store 8 pixels
+                      "it         ge                              \n\t"
+                      "ldmge      %[xx]!, {r5, r7, r9, r11}       \n\t"   // load ptrs to pixels 0-7
+                      "bge        1b                              \n\t"   // loop if counter >= 0
+                      "2:                                         \n\t"
+                      "adds       %[count], %[count], #8          \n\t"   // fix up counter, set flags
+                      "beq        4f                              \n\t"   // if count == 0, branch to exit
+                      "3:                                         \n\t"   // singles loop
+                      "ldrh       r4, [%[xx]], #2                 \n\t"   // load pixel ptr
+                      "subs       %[count], %[count], #1          \n\t"   // decrement loop counter
+                      "ldrb       r5, [%[srcAddr], r4]            \n\t"   // load pixel from image
+                      "ldr        r6, [%[table], r5, lsl #2]      \n\t"   // load SkPMColor from colmap
+                      "str        r6, [%[colors]], #4             \n\t"   // store pixel, update ptr
+                      "bne        3b                              \n\t"   // loop if counter != 0
+                      "4:                                         \n\t"   // exit
+                      : [xx] "+r" (xx), [count] "+r" (count), [colors] "+r" (colors)
+                      : [table] "r" (table), [srcAddr] "r" (srcAddr)
+                      : "memory", "cc", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "lr"
+                      );
     }
 
     s.fBitmap->getColorTable()->unlockColors();
