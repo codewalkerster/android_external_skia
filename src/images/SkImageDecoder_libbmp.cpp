@@ -25,8 +25,8 @@ public:
     }
 
 protected:
-    virtual bool onDecode(SkStream* stream, SkBitmap* bm, Mode mode) SK_OVERRIDE;
     int mMaxDecodeWidth;
+    virtual Result onDecode(SkStream* stream, SkBitmap* bm, Mode mode) SK_OVERRIDE;
 
 private:
     typedef SkImageDecoder INHERITED;
@@ -101,20 +101,20 @@ SkBMPImageDecoder::SkBMPImageDecoder(){
     mMaxDecodeWidth = atoi(value);
 }
 
-bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
+SkImageDecoder::Result SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     // First read the entire stream, so that all of the data can be passed to
     // the BmpDecoderHelper.
 
     // Allocated space used to hold the data.
     size_t length = stream->getLength();
-    if (length > mMaxDecodeWidth*mMaxDecodeWidth*3+1024) {
-        return false;
+    if ((int)length > mMaxDecodeWidth*mMaxDecodeWidth*3+1024) {
+        return kFailure;
     }
     SkAutoMalloc storage;
     // Byte length of all of the data.
     length = CopyStreamToStorage(&storage, stream);
     if (0 == length) {
-        return 0;
+        return kFailure;
     }
 
     const bool justBounds = SkImageDecoder::kDecodeBounds_Mode == mode;
@@ -126,7 +126,7 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
         const int max_pixels = mMaxDecodeWidth*mMaxDecodeWidth; // max width*height
         if (!helper.DecodeImage((const char*)storage.get(), length,
                                 max_pixels, &callback)) {
-            return false;
+            return kFailure;
         }
     }
 
@@ -149,17 +149,17 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
                                   colorType, kOpaque_SkAlphaType));
 
     if (justBounds) {
-        return true;
+        return kSuccess;
     }
 
     if (!this->allocPixelRef(bm, NULL)) {
-        return false;
+        return kFailure;
     }
 
     SkAutoLockPixels alp(*bm);
 
     if (!sampler.begin(bm, SkScaledBitmapSampler::kRGB, *this)) {
-        return false;
+        return kFailure;
     }
 
     const int srcRowBytes = width * 3;
@@ -171,5 +171,5 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
         sampler.next(srcRow);
         srcRow += sampler.srcDY() * srcRowBytes;
     }
-    return true;
+    return kSuccess;
 }
