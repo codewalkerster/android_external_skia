@@ -5,6 +5,8 @@
 #include <SkUtils.h>
 #include <SkBitmapProcState_utils.h>
 
+#if !defined(__aarch64__)
+
 /*
  * For clamp
  */
@@ -3366,3 +3368,4 @@ SkBitmapProcState::ShaderProc32 SkBitmap_find_merge_proc(SkBitmapProcState::Samp
     return fShaderProc32;
 }
 
+#endif

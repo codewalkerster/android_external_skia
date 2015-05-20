@@ -380,6 +380,7 @@ void clampx_nofilter_trans(const SkBitmapProcState& s,
  * tao.zeng@amlogic.com, combine operation of clampx_nofilter_trans
  * and S16_opaque_D32_nofilter_DX
  */
+#if !defined(__aarch64__)
 extern void S16_D32_decal_nofilter_scale_t(uint16_t *srcAddr, int fx, int dx, SkPMColor dstC[], int count);
 void ClampX_S16_D32_nofilter_trans_t(const     SkBitmapProcState& s,
                                      int       x,
@@ -444,6 +445,7 @@ void ClampX_S16_D32_nofilter_trans_t(const     SkBitmapProcState& s,
     // fill the remaining with the max value
     sk_memset32(dstC, SkPixel16ToPixel32(srcAddr[width - 1]), count);
 }
+#endif
 
 // S32_opaque_D32_nofilter_DX + clampx_nofilter_trans
 void ClampX_S32_D32_nofilter_trans_t(const     SkBitmapProcState& s,

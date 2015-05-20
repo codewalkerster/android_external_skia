@@ -384,9 +384,11 @@ SkBitmapProcState::~SkBitmapProcState() {
     SkDELETE(fBitmapFilter);
 }
 
+#if !defined(__aarch64__)
 extern SkBitmapProcState::ShaderProc32 SkBitmap_find_merge_proc(SkBitmapProcState::SampleProc32 fSampleProc32,
                                                                 bool clampClamp,
                                                                 SkBitmapProcState::MatrixProc fMatrixProc);
+#endif
 bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
     SkASSERT(fOrigBitmap.width() && fOrigBitmap.height());
 
@@ -631,7 +633,7 @@ bool SkBitmapProcState::chooseProcs(const SkMatrix& inv, const SkPaint& paint) {
             fShaderProc32 = SK_ARM_NEON_WRAP(Clamp_SI8_opaque_D32_filter_DX_shaderproc);
         }
 
-    #if !SK_ARM_NEON_IS_NONE
+    #if !SK_ARM_NEON_IS_NONE && !defined(__aarch64__)
         if (fShaderProc32 == NULL) {
             fShaderProc32 = SkBitmap_find_merge_proc(fSampleProc32, clampClamp, fMatrixProc);
         }

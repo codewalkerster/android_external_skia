@@ -330,11 +330,15 @@ bool SkRegion::setRuns(RunType runs[], int count) {
     // must call this before we can write directly into runs()
     // in case we are sharing the buffer with another region (copy on write)
     fRunHead = fRunHead->ensureWritable();
+#if !defined(__aarch64__)
     if (!count && count <0x20) {                                        // tao.zeng, add
         memcpy_small_a4(fRunHead->writable_runs(), runs, count);
     } else {
+#endif
         memcpy(fRunHead->writable_runs(), runs, count * sizeof(RunType));
+#if !defined(__aarch64__)
     }
+#endif
     fRunHead->computeRunBounds(&fBounds);
 
     SkDEBUGCODE(this->validate();)

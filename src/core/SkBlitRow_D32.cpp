@@ -17,7 +17,10 @@ SkBlitRow::ColorRectProc PlatformColorRectProcFactory();
 static void S32_Opaque_BlitRow32(SkPMColor* SK_RESTRICT dst,
                                  const SkPMColor* SK_RESTRICT src,
                                  int count, U8CPU alpha) {
-#if 0
+#if defined(__aarch64__)
+    /*
+     * TODO: optimize for AARCH64
+     */
     SkASSERT(255 == alpha);
     sk_memcpy32(dst, src, count);
 #else
@@ -221,7 +224,7 @@ void SkBlitRow::Color32(SkPMColor* SK_RESTRICT dst,
             sk_memset32(dst, color, count);
         } else {
             unsigned scale = 256 - SkAlpha255To256(colorA);
-        #if defined(__ARM_HAVE_NEON)
+        #if defined(__ARM_HAVE_NEON) && !defined(__aarch64__)
             /*
              * tao.zeng@amlogic.com, use NEON to optimize these funciton
              */
@@ -301,6 +304,9 @@ void SkBlitRow::Color32(SkPMColor* SK_RESTRICT dst,
                 : "memory"
             );
         #else
+            /*
+             * TODO: optimize for AARCH64
+             */
             do {
                 *dst = color + SkAlphaMulQ(*src, scale);
                 src += 1;
@@ -342,6 +348,7 @@ static void D32_Mask_Opaque(void* dst, size_t dstRB, SkBitmap::Config,
     maskRB -= width;
     dstRB -= (width << 2);
 
+#if !defined(__aarch64__)
     asm volatile (
         "vmov       s0,  %[pmc]                     \n"     // set ARGB of pmc
         "vdup.32    d31, %[pmc]                     \n"     // d31 = pmc.32
@@ -353,9 +360,13 @@ static void D32_Mask_Opaque(void* dst, size_t dstRB, SkBitmap::Config,
         : [pmc] "r" (pmc)
         : "cc", "memory"
     );
+#endif
 
     do {
-    #if 0
+    #if defined(__aarch64__)
+        /*
+         * TODO: optimize for AARCH64
+         */
         int w = width;
         do {
             unsigned aa = *mask++;
@@ -472,6 +483,7 @@ static void D32_Mask_Opaque(void* dst, size_t dstRB, SkBitmap::Config,
         mask += maskRB;
     } while (--height != 0);
 
+#if !defined(__aarch64__)
     asm volatile (
     "D32_Mask_Opaque_table:                         \n"
         ".word      0x00000000                      \n"
@@ -479,6 +491,7 @@ static void D32_Mask_Opaque(void* dst, size_t dstRB, SkBitmap::Config,
         ".word      0x02020202                      \n"
         ".word      0x03030303                      \n"
     );
+#endif
 }
 
 static void D32_Mask_Black(void* dst, size_t dstRB, SkBitmap::Config,

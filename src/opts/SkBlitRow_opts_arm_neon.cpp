@@ -742,11 +742,14 @@ void S32A_Opaque_BlitRow32_neon(SkPMColor* SK_RESTRICT dst,
     }
 }
 
+#if !defined(__aarch64__)
 extern "C" {
     void S32A_Opaque_BlitRow32_neon_o(SkPMColor* SK_RESTRICT dst,
                                 const SkPMColor* SK_RESTRICT src,
                                 int count, U8CPU alpha);
 }
+#endif
+
 void S32A_Opaque_BlitRow32_neon_src_alpha(SkPMColor* SK_RESTRICT dst,
                                 const SkPMColor* SK_RESTRICT src,
                                 int count, U8CPU alpha) {
@@ -1119,7 +1122,7 @@ void S32A_D565_Opaque_Dither_neon (uint16_t * SK_RESTRICT dst,
                                    const SkPMColor* SK_RESTRICT src,
                                    int count, U8CPU alpha, int x, int y) {
     SkASSERT(255 == alpha);
-#if 0
+#if defined(__aarch64__)
 #define    UNROLL    8
 
     if (count >= UNROLL) {
@@ -1687,8 +1690,11 @@ const SkBlitRow::Proc32 sk_blitrow_platform_32_procs_arm_neon[] = {
      */
 #if SK_A32_SHIFT == 24
     // This proc assumes the alpha value occupies bits 24-32 of each SkPMColor
-    //S32A_Opaque_BlitRow32_neon_src_alpha,   // S32A_Opaque,
+#if defined(__aarch64__)
+    S32A_Opaque_BlitRow32_neon_src_alpha,   // S32A_Opaque,
+#else
     S32A_Opaque_BlitRow32_neon_o,
+#endif
 #else
     S32A_Opaque_BlitRow32_neon,     // S32A_Opaque,
 #endif

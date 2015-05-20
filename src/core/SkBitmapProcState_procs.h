@@ -94,7 +94,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
                                 SkASSERT(state.fAlphaScale == 256)
 #define RETURNDST(src)          src
 #define SRC_TO_FILTER(src)      src
-#if !SK_ARM_NEON_IS_NONE
+#if !SK_ARM_NEON_IS_NONE && !defined(__aarch64__)
 #include "SkUtils.h"
 
 #if DSTSIZE==32
@@ -254,7 +254,7 @@ void NAME_WRAP(S32_opaque_D32_nofilter_DX_t)(const SkBitmapProcState& s,
                                 SkASSERT(state.fAlphaScale == 256)
 #define RETURNDST(src)          SkPixel16ToPixel32(src)
 #define SRC_TO_FILTER(src)      src
-#if !SK_ARM_NEON_IS_NONE
+#if !SK_ARM_NEON_IS_NONE && !defined(__aarch64__)
 #if DSTSIZE==32
     #define DSTTYPE SkPMColor
 #elif DSTSIZE==16
@@ -471,7 +471,7 @@ void NAME_WRAP(S16_opaque_D32_nofilter_DX_t)(const SkBitmapProcState& s,
 #define RETURNDST(src)          table[src]
 #define SRC_TO_FILTER(src)      table[src]
 #define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors()
-#if !SK_ARM_NEON_IS_NONE
+#if !SK_ARM_NEON_IS_NONE && !defined(__aarch64__)
 #if DSTSIZE==32
     #define DSTTYPE SkPMColor
 #elif DSTSIZE==16
@@ -841,7 +841,7 @@ void NAME_WRAP(SI8_opaque_D32_filter_DX_t)(const SkBitmapProcState& s,
 #define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors()
 #include "SkBitmapProcState_shaderproc.h"
 
-#if !SK_ARM_NEON_IS_NONE
+#if !SK_ARM_NEON_IS_NONE && !defined(__aarch64__)
 #define TILEX_PROCF(fx, max)    SkClampMax((fx) >> 16, max)
 #define TILEY_PROCF(fy, max)    SkClampMax((fy) >> 16, max)
 #define TILEX_LOW_BITS(fx, max) (((fx) >> 12) & 0xF)
