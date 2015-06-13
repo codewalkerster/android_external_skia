@@ -16,6 +16,8 @@
 #include "SkUtilsArm.h"
 #include "SkXfermode.h"
 
+static inline void blend32_16_row_loop(uint32_t, unsigned int, uint16_t [], int);
+
 #if SK_ARM_NEON_IS_ALWAYS && defined(SK_CPU_LENDIAN)
     #include <arm_neon.h>
 #else
@@ -332,10 +334,14 @@ void SkRGB16_Opaque_Blitter::blitAntiH(int x, int y,
                 uint32_t src32 = srcExpanded * scale5;
                 scale5 = 32 - scale5; // now we can use it on the device
                 int n = count;
+            #if 0
                 do {
                     uint32_t dst32 = SkExpand_rgb_16(*device) * scale5;
                     *device++ = SkCompact_rgb_16((src32 + dst32) >> 5);
                 } while (--n != 0);
+            #else
+                blend32_16_row_loop(src32, scale5, device, n);
+            #endif
                 goto DONE;
             }
         }
@@ -551,10 +557,8 @@ static uint32_t pmcolor_to_expand16(SkPMColor c) {
     return (g << 24) | (r << 13) | (b << 2);
 }
 
-static inline void blend32_16_row(SkPMColor src, uint16_t dst[], int count) {
-    SkASSERT(count > 0);
-    uint32_t src_expand = pmcolor_to_expand16(src);
-    unsigned scale = SkAlpha255To256(0xFF - SkGetPackedA32(src)) >> 3;
+static inline void blend32_16_row_loop(uint32_t src_expand, unsigned int scale, uint16_t dst[], int count)
+{
 #if defined(__ARM_HAVE_NEON)
     asm volatile (
         /*
@@ -702,6 +706,151 @@ static inline void blend32_16_row(SkPMColor src, uint16_t dst[], int count) {
         :[scale] "r" (scale), [dst] "r" (dst), [count] "r" (count), [src_expand] "r"(src_expand)
         :"memory"
     );
+#elif defined (SK_CPU_ARM64)
+    asm volatile (
+        /*
+         * tao.zeng, optimize this function by NEON
+         * Register Allocate:
+         * v0  --> Mask
+         * v2  --> dst[0 --  7]
+         * v16  --> src_expand
+         * v17 - v20 --> tmp
+         * v7  --> scale
+         */
+        "movi           v0.4s, #0x3f                \n"
+        "mov            v7.s[0], %w[scale]          \n"         // v4 = [scale]
+        "dup            v16.4s, %w[src_expand]      \n"
+        "cmp            %[count], #16               \n"
+        "shl            v0.4s, v0.4s, #5            \n"         // v0  = mask of G
+        "blt            1f                          \n"
+        // main loop, process 16 data each loop
+    "2:                                             \n"
+        "ld1            {v2.4h, v3.4h, v4.4h, v5.4h}, [%[dst]]    \n"
+        "sub            %[count], %[count], #16     \n"
+        "cmp            %[count], #16               \n"
+
+        "uxtl           v17.4s, v2.4h               \n"         // expand to 32bit
+        "uxtl           v18.4s, v3.4h               \n"
+        "uxtl           v19.4s, v4.4h               \n"
+        "uxtl           v20.4s, v5.4h               \n"
+        "and            v21.16b, v17.16b, v0.16b    \n"            // get G
+        "and            v22.16b, v18.16b, v0.16b    \n"
+        "and            v23.16b, v19.16b, v0.16b    \n"
+        "and            v24.16b, v20.16b, v0.16b    \n"
+        "bic            v17.16b, v17.16b, v0.16b    \n"         // clear G
+        "bic            v18.16b, v18.16b, v0.16b    \n"
+        "bic            v19.16b, v19.16b, v0.16b    \n"
+        "bic            v20.16b, v20.16b, v0.16b    \n"
+        "sli            v17.4s, v21.4s, #16         \n"         // insert G to high bits
+        "sli            v18.4s, v22.4s, #16         \n"
+        "sli            v19.4s, v23.4s, #16         \n"
+        "sli            v20.4s, v24.4s, #16         \n"
+        "mul            v17.4s, v17.4s, v7.s[0]     \n"         // scale
+        "mul            v18.4s, v18.4s, v7.s[0]     \n"
+        "mul            v19.4s, v19.4s, v7.s[0]     \n"
+        "mul            v20.4s, v20.4s, v7.s[0]     \n"
+        "add            v17.4s, v17.4s, v16.4s      \n"         // add source
+        "add            v18.4s, v18.4s, v16.4s      \n"
+        "add            v19.4s, v19.4s, v16.4s      \n"
+        "add            v20.4s, v20.4s, v16.4s      \n"
+        "ushr           v17.4s, v17.4s, #5          \n"         // scale back
+        "ushr           v18.4s, v18.4s, #5          \n"
+        "ushr           v19.4s, v19.4s, #5          \n"
+        "ushr           v20.4s, v20.4s, #5          \n"
+        "ushr           v21.4s, v17.4s, #16         \n"         // get scaled G
+        "ushr           v22.4s, v18.4s, #16         \n"
+        "ushr           v23.4s, v19.4s, #16         \n"
+        "ushr           v24.4s, v20.4s, #16         \n"
+        "bit            v17.16b, v21.16b, v0.16b    \n"         // insert G
+        "bit            v18.16b, v22.16b, v0.16b    \n"
+        "bit            v19.16b, v23.16b, v0.16b    \n"
+        "bit            v20.16b, v24.16b, v0.16b    \n"
+        "xtn            v2.4h, v17.4s               \n"         // narrow data
+        "xtn            v3.4h, v18.4s               \n"
+        "xtn            v4.4h, v19.4s               \n"
+        "xtn            v5.4h, v20.4s               \n"
+        "st1            {v2.4h, v3.4h, v4.4h, v5.4h}, [%[dst]], #32 \n"
+        "bge            2b                          \n"
+        "cmp            %[count], #0                \n"
+        "beq            4f                          \n"
+
+    "1:                                             \n"
+        "cmp            %[count], #8                \n"
+        "blt            3f                          \n"
+        "ld1            {v2.4h, v3.4h}, [%[dst]]    \n"
+        "subs           %[count], %[count], #8      \n"
+
+        "uxtl           v17.4s, v2.4h               \n"         // expand to 32bit
+        "uxtl           v18.4s, v3.4h               \n"
+        "and            v21.16b, v17.16b, v0.16b    \n"            // get G
+        "and            v22.16b, v18.16b, v0.16b    \n"
+        "bic            v17.16b, v17.16b, v0.16b    \n"         // clear G
+        "bic            v18.16b, v18.16b, v0.16b    \n"
+        "sli            v17.4s, v21.4s, #16         \n"         // insert G to high bits
+        "sli            v18.4s, v22.4s, #16         \n"
+        "mul            v17.4s, v17.4s, v7.s[0]     \n"         // scale
+        "mul            v18.4s, v18.4s, v7.s[0]     \n"
+        "add            v17.4s, v17.4s, v16.4s      \n"         // add source
+        "add            v18.4s, v18.4s, v16.4s      \n"
+        "ushr           v17.4s, v17.4s, #5          \n"         // scale back
+        "ushr           v18.4s, v18.4s, #5          \n"
+        "ushr           v21.4s, v17.4s, #16         \n"         // get scaled G
+        "ushr           v22.4s, v18.4s, #16         \n"
+        "bit            v17.16b, v21.16b, v0.16b    \n"         // insert G
+        "bit            v18.16b, v22.16b, v0.16b    \n"
+        "xtn            v2.4h, v17.4s               \n"         // narrow data
+        "xtn            v3.4h, v18.4s               \n"
+        "st1            {v2.4h, v3.4h}, [%[dst]], #16 \n"
+        "beq            4f                          \n"
+
+    "3:                                             \n"
+        "cmp            %[count], #4                \n"
+        "blt            5f                          \n"
+        "ld1            {v2.4h}, [%[dst]]           \n"
+        "b              6f                          \n"
+
+    "5:                                             \n"
+        "cmp            %[count], #2                \n"
+        "blt            7f                          \n"
+        "ld1            {v2.s}[0], [%[dst]]         \n"
+        "b              6f                          \n"
+
+    "7:                                             \n"
+        "ld1            {v2.h}[0], [%[dst]]         \n"
+
+    "6:                                             \n"
+        "uxtl           v17.4s, v2.4h               \n"         // expand to 32bit
+        "and            v21.16b, v17.16b, v0.16b    \n"            // get G
+        "bic            v17.16b, v17.16b, v0.16b    \n"         // clear G
+        "sli            v17.4s, v21.4s, #16         \n"         // insert G to high bits
+        "mul            v17.4s, v17.4s, v7.s[0]     \n"         // scale
+        "add            v17.4s, v17.4s, v16.4s      \n"         // add source
+        "ushr           v17.4s, v17.4s, #5          \n"         // scale back
+        "ushr           v21.4s, v17.4s, #16         \n"         // get scaled G
+        "bit            v17.16b, v21.16b, v0.16b    \n"         // insert G
+        "xtn            v2.4h, v17.4s               \n"         // narrow data
+
+        "cmp            %[count], #4                \n"
+        "blt            8f                          \n"
+        "st1            {v2.4h}, [%[dst]], #8       \n"
+        "subs           %[count], %[count], #4      \n"
+        "beq            4f                          \n"
+        "b              5b                          \n"
+    "8:                                             \n"
+        "cmp            %[count], #2                \n"
+        "blt            9f                          \n"
+        "st1            {v2.s}[0], [%[dst]], #4     \n"
+        "subs           %[count], %[count], #2      \n"
+        "beq            4f                          \n"
+        "b              7b                          \n"
+    "9:                                             \n"
+        "st1            {v2.h}[0], [%[dst]], #2     \n"
+
+    "4:                                             \n"
+        :[dst] "+r" (dst), [count] "+r" (count)
+        :[src_expand] "r"(src_expand), [scale] "r" (scale)
+        :"memory"
+    );
 #else
     do {
         uint32_t dst_expand = SkExpand_rgb_16(*dst) * scale;
@@ -709,6 +858,16 @@ static inline void blend32_16_row(SkPMColor src, uint16_t dst[], int count) {
         dst += 1;
     } while (--count != 0);
 #endif
+}
+
+static inline void blend32_16_row(SkPMColor src, uint16_t dst[], int count) {
+    SkASSERT(count > 0);
+    uint32_t src_expand = pmcolor_to_expand16(src);
+    unsigned scale = SkAlpha255To256(0xFF - SkGetPackedA32(src)) >> 3;
+    if (count == 0) {
+        return ;
+    }
+    blend32_16_row_loop(src_expand, scale, dst, count);
 }
 
 void SkRGB16_Blitter::blitH(int x, int y, int width) {
@@ -742,10 +901,14 @@ void SkRGB16_Blitter::blitAntiH(int x, int y,
             unsigned scale5 = SkAlpha255To256(aa) * scale >> (8 + 3);
             uint32_t src32 =  srcExpanded * scale5;
             scale5 = 32 - scale5;
+        #if 0
             do {
                 uint32_t dst32 = SkExpand_rgb_16(*device) * scale5;
                 *device++ = SkCompact_rgb_16((src32 + dst32) >> 5);
             } while (--count != 0);
+        #else
+            blend32_16_row_loop(src32, scale5, device, count);
+        #endif
             continue;
         }
         device += count;

@@ -38,7 +38,26 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static void sk_memset32_portable(uint32_t dst[], uint32_t value, int count);
 static void sk_memset16_portable(uint16_t dst[], uint16_t value, int count) {
+#if defined(__aarch64__)
+    uint32_t tmp;
+    unsigned long p;
+    value &= 0xffff;
+    tmp = (value | value << 16);
+    p = (unsigned long)dst;
+    if (p & 0x02) {
+        *dst++ = value;
+        count--;
+    }
+    if (count >> 1) {
+        sk_memset32_portable((uint32_t *)dst, tmp, count >> 1);
+    }
+    if (count & 1) {
+        *dst++ = value;
+        count--;
+    }
+#else
     SkASSERT(dst != NULL && count >= 0);
 
     if (count <= 0) {
@@ -89,11 +108,48 @@ static void sk_memset16_portable(uint16_t dst[], uint16_t value, int count) {
     if (count & 1) {
         *dst = (uint16_t)value;
     }
+#endif
 }
 
 static void sk_memset32_portable(uint32_t dst[], uint32_t value, int count) {
     SkASSERT(dst != NULL && count >= 0);
-
+#if defined(__aarch64__)
+    asm volatile (
+        "orr    x7, %x[value], %x[value], lsl #32           \n"
+        "cmp    %[count], #16                               \n"
+        "b.lt   1f                                          \n"
+        "sub    %[count], %[count], #16                     \n"
+        "sub    %[dst], %[dst], #16                         \n" // pre-bias
+    "2:                                                     \n"
+        "stp    x7, x7, [%[dst], #16]                       \n"
+        "stp    x7, x7, [%[dst], #32]                       \n"
+        "stp    x7, x7, [%[dst], #48]                       \n"
+        "stp    x7, x7, [%[dst], #64]!                      \n"
+        "subs   %[count], %[count], #16                     \n"
+        "b.ge   2b                                          \n"
+        "adds   %[count], %[count], #16                     \n"
+        "add    %[dst], %[dst], #16                         \n"
+        "b.ne   1f                                          \n"
+        "ret                                                \n"
+    "1:                                                     \n"
+        "tbz    %[count], #3, 4f                            \n"
+        "stp    x7, x7, [%[dst]], #16                       \n"
+        "stp    x7, x7, [%[dst]], #16                       \n"
+    "4:                                                     \n"
+        "tbz    %[count], #2, 5f                            \n"
+        "stp    x7, x7, [%[dst]], #16                       \n"
+    "5:                                                     \n"
+        "tbz    %[count], #1, 6f                            \n"
+        "str    x7, [%[dst]], #8                            \n"
+    "6:                                                     \n"
+        "tbz    %[count], #0, 7f                            \n"
+        "str    w7, [%[dst]], #4                            \n"
+    "7:                                                     \n"
+        :[count] "+r" (count), [dst] "+r" (dst)
+        :[value] "r" (value)
+        :"memory", "cc", "x7"
+    );
+#else
     int sixteenlongs = count >> 4;
     if (sixteenlongs) {
         do {
@@ -107,6 +163,7 @@ static void sk_memset32_portable(uint32_t dst[], uint32_t value, int count) {
             *dst++ = value;
         } while (--count != 0);
     }
+#endif
 }
 
 static void sk_memcpy32_portable(uint32_t dst[], const uint32_t src[], int count) {
