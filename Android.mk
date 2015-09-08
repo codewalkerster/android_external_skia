@@ -59,6 +59,8 @@ endif
 
 LOCAL_CFLAGS += \
 	-Wno-unused-parameter \
+	-DSK_SUPPORT_LEGACY_IMAGEDECODER_CHOOSER \
+	-DSK_SUPPORT_LEGACY_SETCONFIG \
 	-U_FORTIFY_SOURCE \
 	-D_FORTIFY_SOURCE=1
 
@@ -691,14 +693,14 @@ include $(BUILD_SHARED_LIBRARY)
 #
 
 # benchmark (timings)
-include $(BASE_PATH)/bench/Android.mk
-include $(BASE_PATH)/tools/Android.mk
+#include $(BASE_PATH)/bench/Android.mk
+#include $(BASE_PATH)/tools/Android.mk
 
 # golden-master (fidelity / regression test)
-include $(BASE_PATH)/gm/Android.mk
+#include $(BASE_PATH)/gm/Android.mk
 
 # unit-tests
-include $(BASE_PATH)/tests/Android.mk
+#include $(BASE_PATH)/tests/Android.mk
 
 # diamond-master (one test to rule them all)
-include $(BASE_PATH)/dm/Android.mk
+#include $(BASE_PATH)/dm/Android.mk
