@@ -22,7 +22,7 @@
  * S32_opaque_D32_nofilter_DX, in order to avoid buffer load and store
  * opreations, and get more efficient
  */
-void S32_D32_decal_nofilter_scale_t(uint32_t *srcAddr, int fx, int dx, SkPMColor dstC[], int count)
+void S32_D32_decal_nofilter_scale_t(const SkPMColor* srcAddr, int fx, int dx, SkPMColor dstC[], int count)
 {
     /*
      * @amlogic.com, use assemble code to optimze this branch,
@@ -287,50 +287,52 @@ void ClampX_S32_D32_nofilter_scale_t(const     SkBitmapProcState& s,
         return ;
     }
 
-    uint32_t* SK_RESTRICT srcAddr = (uint32_t *)s.fBitmap->getPixels();
+    const SkPMColor* SK_RESTRICT srcAddr = (const SkPMColor*)s.fBitmap->getPixels();
     const unsigned maxX = s.fBitmap->width() - 1;
-    SkFixed fx;
+    SkFractionalInt fx;
     {
         SkPoint pt;
         s.fInvProc(s.fInvMatrix, SkIntToScalar(x) + SK_ScalarHalf,
-                                  SkIntToScalar(y) + SK_ScalarHalf, &pt);
-        fx = SkScalarToFixed(pt.fY);
+                SkIntToScalar(y) + SK_ScalarHalf, &pt);
+        fx = SkScalarToFractionalInt(pt.fY);
         const unsigned maxY = s.fBitmap->height() - 1;
-        srcAddr = (uint32_t *)((char*)srcAddr +
-                   TILEY_PROCF(fx, maxY) * s.fBitmap->rowBytes());
-        fx = SkScalarToFixed(pt.fX);
+        srcAddr = (const SkPMColor*)((const char*)srcAddr +
+                (TILEY_PROCF(SkFractionalIntToFixed(fx), maxY))* s.fBitmap->rowBytes());
+        fx = SkScalarToFractionalInt(pt.fX);
     }
 
     if (0 == maxX) {
+        // all of the following X values must be 0
         sk_memset32(dstC, srcAddr[0], count);
         return;
     }
 
-    const SkFixed dx = s.fInvSx;
+    const SkFractionalInt dx = s.fInvSxFractionalInt;
 
-    //LOGD(">>>> fx:%8x, dx:%8x, cnt:%3d, mla:%8x", fx, dx, count, fx + dx * count);
-    int i;
 #ifdef CHECK_FOR_DECAL
     // test if we don't need to apply the tile proc
-    if ((unsigned)(fx >> 16) <= maxX &&
-        (unsigned)((fx + dx * (count - 1)) >> 16) <= maxX) {
-
-        S32_D32_decal_nofilter_scale_t(srcAddr, fx, dx, dstC, count);
+    if (can_truncate_to_fixed_for_decal(fx, dx, count, maxX)) {
+        S32_D32_decal_nofilter_scale_t(srcAddr,
+                                       SkFractionalIntToFixed(fx),
+                                       SkFractionalIntToFixed(dx),
+                                       dstC, count);
         return;
     }
 #endif
 
-    /*
-     * this branch hardly occurs
-     */
-    for (i = count >> 2; i > 0; --i) {
-        *dstC++ = srcAddr[TILEX_PROCF(fx, maxX)]; fx += dx;
-        *dstC++ = srcAddr[TILEX_PROCF(fx, maxX)]; fx += dx;
-        *dstC++ = srcAddr[TILEX_PROCF(fx, maxX)]; fx += dx;
-        *dstC++ = srcAddr[TILEX_PROCF(fx, maxX)]; fx += dx;
+    for (int i = count >> 2; i > 0; --i) {
+        *dstC++ = srcAddr[TILEX_PROCF(SkFractionalIntToFixed(fx), maxX)];
+        fx += dx;
+        *dstC++ = srcAddr[TILEX_PROCF(SkFractionalIntToFixed(fx), maxX)];
+        fx += dx;
+        *dstC++ = srcAddr[TILEX_PROCF(SkFractionalIntToFixed(fx), maxX)];
+        fx += dx;
+        *dstC++ = srcAddr[TILEX_PROCF(SkFractionalIntToFixed(fx), maxX)];
+        fx += dx;
     }
-    for (i = count & 3; i > 0; --i) {
-        *dstC++ = srcAddr[TILEX_PROCF(fx, maxX)]; fx += dx;
+    for (int i = count & 3; i > 0; --i) {
+        *dstC++ = srcAddr[TILEX_PROCF(SkFractionalIntToFixed(fx), maxX)];
+        fx += dx;
     }
 }
 
