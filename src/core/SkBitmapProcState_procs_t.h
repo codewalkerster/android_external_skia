@@ -470,7 +470,7 @@ void S16_opaque_D32_nofilter_DX_t(const SkBitmapProcState& s,
 #define PREAMBLE(state)         const SkPMColor* SK_RESTRICT table = state.fBitmap->getColorTable()->lockColors()
 #define RETURNDST(src)          table[src]
 #define SRC_TO_FILTER(src)      table[src]
-#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors(false)
+#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors()
 /*
  * tao.zeng@amlogic.com
  * use NEON to optimze function: SI8_opaque_D32_filter_DX 
@@ -671,7 +671,7 @@ void SI8_opaque_D32_filter_DX_t(const SkBitmapProcState& s,
                                 const SkPMColor* SK_RESTRICT table = state.fBitmap->getColorTable()->lockColors()
 #define RETURNDST(src)          SkAlphaMulQ(table[src], alphaScale)
 #define SRC_TO_FILTER(src)      table[src]
-#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors(false)
+#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors()
 #include "SkBitmapProcState_sample.h"
 
 // SRC == 4444
@@ -836,7 +836,7 @@ void SI8_opaque_D32_filter_DX_t(const SkBitmapProcState& s,
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kIndex8_Config)
 #define PREAMBLE(state)         const SkPMColor* SK_RESTRICT table = state.fBitmap->getColorTable()->lockColors()
 #define SRC_TO_FILTER(src)      table[src]
-#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors(false)
+#define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors()
 #include "SkBitmapProcState_shaderproc.h"
 
 #undef NAME_WRAP
