@@ -969,7 +969,7 @@ void ClampX_SI8_D32_nofilter_scale_t(const     SkBitmapProcState& s,
     for (i = count & 3; i > 0; --i) {
         *dstC++ = table[srcAddr[TILEX_PROCF(fx, maxX)]]; fx += dx;
     }
-    s.fBitmap->getColorTable()->unlockColors(false);
+    s.fBitmap->getColorTable()->unlockColors();
 }
 
 void S32A_D32_nofilter_scale_t(uint32_t *srcAddr, int fx, int dx, SkPMColor dstC[], int count)
@@ -2911,7 +2911,7 @@ void Clamp_SI8_D32_filter_sale_t(const     SkBitmapProcState& s,
             post_count--;
         }
     }
-    s.fBitmap->getColorTable()->unlockColors(false);
+    s.fBitmap->getColorTable()->unlockColors();
 }
 
 /*

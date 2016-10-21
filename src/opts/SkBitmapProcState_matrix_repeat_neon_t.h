@@ -744,7 +744,7 @@ void RepeatX_SI8_D32_filter_scale_t(const     SkBitmapProcState& s,
         dstC += 1;
         fx += dx;
     } while (--count != 0);
-    s.fBitmap->getColorTable()->unlockColors(false);
+    s.fBitmap->getColorTable()->unlockColors();
 }
 
 static void AFFINE_FILTER_NAME(const SkBitmapProcState& s,
