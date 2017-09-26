@@ -13,6 +13,7 @@
 #include "SkData.h"
 #include "SkFrontBufferedStream.h"
 #include "SkMD5.h"
+#include "SkOSFile.h"
 #include "SkRandom.h"
 #include "SkStream.h"
 #include "SkStreamPriv.h"
@@ -20,6 +21,7 @@
 #include "Test.h"
 
 #include "png.h"
+#include <initializer_list>
 
 static SkStreamAsset* resource(const char path[]) {
     SkString fullPath = GetResourcePath(path);
@@ -1004,6 +1006,21 @@ DEF_TEST(Codec_jpeg_rewind, r) {
     REPORTER_ASSERT(r, SkCodec::kSuccess == result);
 }
 
+DEF_TEST(Codec_InvalidBmp, r) {
+    // These files report values that have caused problems with SkFILEStreams.
+    // They are invalid, and should not create SkCodecs.
+    for (auto* bmp : { "b34778578.bmp" } ) {
+        SkString path = SkOSPath::Join("invalid_images", bmp);
+        path = GetResourcePath(path.c_str());
+        SkAutoTDelete<SkFILEStream> stream(new SkFILEStream(path.c_str()));
+        if (!stream->isValid()) {
+            return;
+        }
+        SkAutoTDelete<SkCodec> codec(SkCodec::NewFromStream(stream.release()));
+        REPORTER_ASSERT(r, !codec);
+    }
+}
+
 DEF_TEST(Codec_InvalidRLEBmp, r) {
     auto* stream = GetResourceAsStream("invalid_images/b33251605.bmp");
     if (!stream) {
@@ -1014,4 +1031,20 @@ DEF_TEST(Codec_InvalidRLEBmp, r) {
     REPORTER_ASSERT(r, codec);
 
     test_info(r, codec.get(), codec->getInfo(), SkCodec::kIncompleteInput, nullptr);
+}
+
+DEF_TEST(Codec_InvalidBmp2, r) {
+    // This file reports a header size that crashes when we try to read this
+    // much directly from a file using SkFILEStream.
+    SkString path = GetResourcePath("invalid_images/b33651913.bmp");
+    SkAutoTDelete<SkFILEStream> stream(new SkFILEStream(path.c_str()));
+    if (!stream->isValid()) {
+        ERRORF(r, "no stream");
+        return;
+    }
+
+    SkAutoTDelete<SkCodec> codec(SkCodec::NewFromStream(stream.release()));
+    // This file is invalid, but more importantly, we did not crash before
+    // reaching here.
+    REPORTER_ASSERT(r, !codec);
 }
