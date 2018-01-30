@@ -718,11 +718,15 @@ LOCAL_C_INCLUDES := \
 	external/dng_sdk \
 	external/piex
 
+ifneq ($(filter px3%, $(PRODUCT_BUILD_MODULE)), )
+
+else
 LOCAL_SHARED_LIBRARIES += libjpeghwdec
 LOCAL_C_INCLUDES += hardware/rockchip/jpeghw/release/decoder_release \
 		hardware/rockchip/librkvpu
 LOCAL_CFLAGS += -DUSE_HW_JPEG
 LOCAL_SRC_FILES += src/images/SkHwJpegUtility.cpp
+endif
 
 LOCAL_EXPORT_C_INCLUDE_DIRS := \
 	$(LOCAL_PATH)/include/codec \
